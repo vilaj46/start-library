@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+  engineType      = "library"
+}
+
+datasource db {
+  provider = "postgresql"
+  extensions = [vector]
+}
+
+model Concept {
+  id                 Int                    @id @default(autoincrement())
+  slug               String                 @unique @db.VarChar(255)
+  name               String                 @db.VarChar(255)
+  category           String
+  subCategory        String                 @map("sub_category") @db.VarChar(255)
+  description        String
+  logic              String
+  appeal             String
+  examples           String[]               @default([])
+  notes              String?
+  levels             Json?                  @default("[]")
+  weight             Float                  @default(1.0)
+  rawInput           String?                @map("raw_input")
+  metadata           Json?
+  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at")
+  embedding          Unsupported("vector(1024)")?
+  conflictsInitiated ConceptConflict[]      @relation("ConceptA")
+  conflictsReceived  ConceptConflict[]      @relation("ConceptB")
+  outgoingEdges      ConceptEdge[]          @relation("SourceConcept")
+  incomingEdges      ConceptEdge[]          @relation("TargetConcept")
+
+  @@map("concepts")
+}
+
+model ConceptConflict {
+  id         Int            @id @default(autoincrement())
+  type       ConflictType   @default(LOGICAL)
+  source     ConflictSource @default(MANUAL)
+  reason     String?
+  severity   Float          @default(1.0)
+  conceptAId Int            @map("concept_a_id")
+  conceptBId Int            @map("concept_b_id")
+  conceptA   Concept        @relation("ConceptA", fields: [conceptAId], references: [id], onDelete: Cascade)
+  conceptB   Concept        @relation("ConceptB", fields: [conceptBId], references: [id], onDelete: Cascade)
+
+  @@unique([conceptAId, conceptBId])
+  @@map("concept_conflicts")
+}
+
+model ConceptEdge {
+  id              Int     @id @default(autoincrement())
+  weight          Float
+  type            EdgeType @default(SEMANTIC)
+  sourceConceptId Int     @map("source_concept_id")
+  targetConceptId Int     @map("target_concept_id")
+  source          Concept @relation("SourceConcept", fields: [sourceConceptId], references: [id], onDelete: Cascade)
+  target          Concept @relation("TargetConcept", fields: [targetConceptId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceConceptId, targetConceptId])
+  @@map("concept_edges")
+}
+
+enum ConflictType {
+  LOGICAL
+}
+
+enum EdgeType {
+  SEMANTIC
+}
+
+enum ConflictSource {
+  MANUAL
+  MATHEMATICAL
+  AI_GENERATED
+}
+
+model Author {
+  id              Int      @id @default(autoincrement())
+  openLibraryId   String   @unique @map("open_library_id")
+  name            String
+  bio             String?  @db.Text
+  rawApiResponse  Json?    @map("raw_api_response")
+  
+  centroid        Unsupported("vector(1024)")? 
+  
+  works           Work[]
+  
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([centroid], map: "author_centroid_idx")
+  @@map("authors")
+}
+
+model Work {
+  id              Int      @id @default(autoincrement())
+  title           String
+  description     String?  @db.Text
+  rawApiResponse  Json?    @map("raw_api_response")
+  embedding       Unsupported("vector(1024)")?
+  
+  authorId        Int      @map("author_id")
+  author          Author   @relation(fields: [authorId], references: [id])
+  
+  concepts        Concept[] 
+
+  @@map("works")
+}
