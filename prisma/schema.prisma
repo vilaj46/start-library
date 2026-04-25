@@ -24,12 +24,14 @@ model Concept {
   weight             Float                  @default(1.0)
   rawInput           String?                @map("raw_input")
   metadata           Json?
+  isVerified         Boolean                @default(false) @map("is_verified")
   updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at")
   embedding          Unsupported("vector(1024)")?
   conflictsInitiated ConceptConflict[]      @relation("ConceptA")
   conflictsReceived  ConceptConflict[]      @relation("ConceptB")
   outgoingEdges      ConceptEdge[]          @relation("SourceConcept")
   incomingEdges      ConceptEdge[]          @relation("TargetConcept")
+  workConcepts       WorkConcept[]
 
   @@map("concepts")
 }
@@ -90,7 +92,8 @@ model Author {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  @@index([centroid], map: "author_centroid_idx")
+  isVerified      Boolean  @default(false) @map("is_verified")
+
   @@map("authors")
 }
 
@@ -104,7 +107,24 @@ model Work {
   authorId        Int      @map("author_id")
   author          Author   @relation(fields: [authorId], references: [id])
   
-  concepts        Concept[] 
+  isVerified      Boolean  @default(false) @map("is_verified")
+
+  workConcepts    WorkConcept[] 
 
   @@map("works")
+}
+
+model WorkConcept {
+  id         Int      @id @default(autoincrement())
+  workId     Int      @map("work_id")
+  conceptId  Int      @map("concept_id")
+  
+  similarity Float    
+  isVerified Boolean  @default(false) @map("is_verified")
+
+  work       Work     @relation(fields: [workId], references: [id], onDelete: Cascade)
+  concept    Concept  @relation(fields: [conceptId], references: [id])
+
+  @@unique([workId, conceptId])
+  @@map("work_concepts")
 }

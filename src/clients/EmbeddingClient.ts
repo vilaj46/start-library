@@ -9,7 +9,7 @@ export class EmbeddingClient {
     private readonly cachePath: string;
 
     constructor(model: string = "mxbai-embed-large", port: number = 11434) {
-        this.endpoint = `http://localhost:${port}/api/embeddings`;
+        this.endpoint = `http://127.0.0.1:${port}/api/embeddings`;
         this.model = model;
         this.cachePath = path.resolve(process.cwd(), "output/embeddings.cache.json");
         this.loadCache();
@@ -41,8 +41,12 @@ export class EmbeddingClient {
      * Includes basic retry logic for local server stability.
      */
     public async fetch(text: string, attempt: number = 1): Promise<number[]> {
-        if (this.cache[text]) {
-            return this.cache[text];
+        // Truncate text to avoid "context length exceeded" errors in Ollama
+        // mxbai-embed-large limit is ~512 tokens. 6000 chars is a safe buffer.
+        const truncatedText = text.length > 6000 ? text.slice(0, 6000) : text;
+
+        if (this.cache[truncatedText]) {
+            return this.cache[truncatedText];
         }
 
         try {
@@ -54,7 +58,7 @@ export class EmbeddingClient {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     model: this.model,
-                    prompt: text,
+                    prompt: truncatedText,
                 }),
                 signal: controller.signal
             });
@@ -62,19 +66,22 @@ export class EmbeddingClient {
             clearTimeout(timeout);
 
             if (!response.ok) {
-                throw new Error(`Ollama Error: ${response.statusText}`);
+                const body = await response.text();
+                throw new Error(`Ollama Error: ${response.statusText} - ${body}`);
             }
 
             const json = await response.json() as { embedding: number[] };
             const vector = json.embedding || [];
 
             if (vector.length > 0) {
-                this.cache[text] = vector;
+                this.cache[truncatedText] = vector;
             }
 
             return vector;
 
         } catch (error) {
+            const msg = error instanceof Error ? `${error.message} | cause: ${(error as any).cause?.message}` : String(error);
+            console.warn(`⚠️ Ollama attempt ${attempt} error: ${msg}`);
             if (attempt < this.maxRetries) {
                 console.warn(`⚠️ Ollama attempt ${attempt} failed. Retrying...`);
                 // Short delay before retry

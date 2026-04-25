@@ -16,6 +16,7 @@ import { Route as DemoTanstackQueryRouteImport } from './routes/demo/tanstack-qu
 import { Route as DemoTableRouteImport } from './routes/demo/table'
 import { Route as DemoPrismaRouteImport } from './routes/demo/prisma'
 import { Route as ApiConceptsRouteImport } from './routes/api/concepts'
+import { Route as ApiAuthorsOpenlibraryRouteImport } from './routes/api/authors/openlibrary'
 
 const ConceptsRoute = ConceptsRouteImport.update({
   id: '/concepts',
@@ -52,6 +53,11 @@ const ApiConceptsRoute = ApiConceptsRouteImport.update({
   path: '/api/concepts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAuthorsOpenlibraryRoute = ApiAuthorsOpenlibraryRouteImport.update({
+  id: '/api/authors/openlibrary',
+  path: '/api/authors/openlibrary',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -61,6 +67,7 @@ export interface FileRoutesByFullPath {
   '/demo/prisma': typeof DemoPrismaRoute
   '/demo/table': typeof DemoTableRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
+  '/api/authors/openlibrary': typeof ApiAuthorsOpenlibraryRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -70,6 +77,7 @@ export interface FileRoutesByTo {
   '/demo/prisma': typeof DemoPrismaRoute
   '/demo/table': typeof DemoTableRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
+  '/api/authors/openlibrary': typeof ApiAuthorsOpenlibraryRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -80,6 +88,7 @@ export interface FileRoutesById {
   '/demo/prisma': typeof DemoPrismaRoute
   '/demo/table': typeof DemoTableRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
+  '/api/authors/openlibrary': typeof ApiAuthorsOpenlibraryRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -91,6 +100,7 @@ export interface FileRouteTypes {
     | '/demo/prisma'
     | '/demo/table'
     | '/demo/tanstack-query'
+    | '/api/authors/openlibrary'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -100,6 +110,7 @@ export interface FileRouteTypes {
     | '/demo/prisma'
     | '/demo/table'
     | '/demo/tanstack-query'
+    | '/api/authors/openlibrary'
   id:
     | '__root__'
     | '/'
@@ -109,6 +120,7 @@ export interface FileRouteTypes {
     | '/demo/prisma'
     | '/demo/table'
     | '/demo/tanstack-query'
+    | '/api/authors/openlibrary'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -119,6 +131,7 @@ export interface RootRouteChildren {
   DemoPrismaRoute: typeof DemoPrismaRoute
   DemoTableRoute: typeof DemoTableRoute
   DemoTanstackQueryRoute: typeof DemoTanstackQueryRoute
+  ApiAuthorsOpenlibraryRoute: typeof ApiAuthorsOpenlibraryRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -172,6 +185,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiConceptsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/authors/openlibrary': {
+      id: '/api/authors/openlibrary'
+      path: '/api/authors/openlibrary'
+      fullPath: '/api/authors/openlibrary'
+      preLoaderRoute: typeof ApiAuthorsOpenlibraryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -183,6 +203,7 @@ const rootRouteChildren: RootRouteChildren = {
   DemoPrismaRoute: DemoPrismaRoute,
   DemoTableRoute: DemoTableRoute,
   DemoTanstackQueryRoute: DemoTanstackQueryRoute,
+  ApiAuthorsOpenlibraryRoute: ApiAuthorsOpenlibraryRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
