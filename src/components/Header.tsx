@@ -70,6 +70,20 @@ export default function Header() {
           >
             Concepts
           </Link>
+          <Link
+            to="/authors"
+            className="nav-link"
+            activeProps={{ className: 'nav-link is-active' }}
+          >
+            Authors
+          </Link>
+          <Link
+            to="/series"
+            className="nav-link"
+            activeProps={{ className: 'nav-link is-active' }}
+          >
+            Series
+          </Link>
           <a
             href="https://tanstack.com/start/latest/docs/framework/react/overview"
             className="nav-link"

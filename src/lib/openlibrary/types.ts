@@ -32,4 +32,5 @@ export interface OpenLibraryWork {
     oclc_numbers?: string[];
     isbn_10?: string[];
     isbn_13?: string[];
+    series?: string[];
 }

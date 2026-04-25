@@ -110,8 +110,35 @@ model Work {
   isVerified      Boolean  @default(false) @map("is_verified")
 
   workConcepts    WorkConcept[] 
+  workSeries      WorkSeries[]
 
   @@map("works")
+}
+
+model Series {
+  id              Int      @id @default(autoincrement())
+  name            String   @unique
+  description     String?  @db.Text
+  
+  works           WorkSeries[]
+  
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("series")
+}
+
+model WorkSeries {
+  id              Int      @id @default(autoincrement())
+  workId          Int      @map("work_id")
+  seriesId        Int      @map("series_id")
+  order           Int?     // Sequence in series
+  
+  work            Work     @relation(fields: [workId], references: [id], onDelete: Cascade)
+  series          Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@unique([workId, seriesId])
+  @@map("work_series")
 }
 
 model WorkConcept {

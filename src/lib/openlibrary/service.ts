@@ -4,6 +4,7 @@ import { OpenLibraryClient } from "#/clients/OpenLibraryClient";
 import { AuthorRepository } from "../authors/repository";
 import { WorkRepository } from "../works/repository";
 import type { OpenLibraryId } from "./types";
+import { detectSeries } from "./utils";
 
 const embeddingClient = new EmbeddingClient();
 
@@ -99,9 +100,22 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
 
         const vectorString = embeddingClient.toVectorString(workEmbedding);
 
+        const seriesInfo = detectSeries(olWork);
+
         // If the work record didn't exist, create it now.
         if (!work) {
-            work = await WorkRepository.createWithEmbedding(olWork.title, description, olWork, author.id, vectorString);
+            const created = await WorkRepository.createWithEmbedding(
+                olWork.title, 
+                description, 
+                olWork, 
+                author.id, 
+                vectorString
+            );
+            work = { id: created.id, ...olWork };
+        }
+
+        if (seriesInfo.name) {
+            await WorkRepository.linkSeries(work.id, seriesInfo.name, seriesInfo.order);
         }
 
         if (!work) continue;

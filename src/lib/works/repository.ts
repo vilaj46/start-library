@@ -28,6 +28,31 @@ export const WorkRepository = {
         return res[0];
     },
 
+    async linkSeries(workId: number, seriesName: string, order: number | null) {
+        // 1. Find or create the series
+        const series = await prisma.series.upsert({
+            where: { name: seriesName },
+            update: {},
+            create: { name: seriesName }
+        });
+
+        // 2. Link work to series
+        return prisma.workSeries.upsert({
+            where: {
+                workId_seriesId: {
+                    workId,
+                    seriesId: series.id
+                }
+            },
+            update: { order },
+            create: {
+                workId,
+                seriesId: series.id,
+                order
+            }
+        });
+    },
+
     async linkConcept(workId: number, conceptId: number, similarity: number) {
         return prisma.$executeRaw`
             INSERT INTO work_concepts (work_id, concept_id, similarity)

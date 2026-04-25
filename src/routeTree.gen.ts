@@ -12,9 +12,13 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as ConceptsRouteImport } from './routes/concepts'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SeriesIndexRouteImport } from './routes/series/index'
+import { Route as AuthorsIndexRouteImport } from './routes/authors/index'
+import { Route as SeriesSeriesIdRouteImport } from './routes/series.$seriesId'
 import { Route as DemoTanstackQueryRouteImport } from './routes/demo/tanstack-query'
 import { Route as DemoTableRouteImport } from './routes/demo/table'
 import { Route as DemoPrismaRouteImport } from './routes/demo/prisma'
+import { Route as AuthorsAuthorIdRouteImport } from './routes/authors.$authorId'
 import { Route as ApiConceptsRouteImport } from './routes/api/concepts'
 import { Route as ApiAuthorsOpenlibraryRouteImport } from './routes/api/authors/openlibrary'
 
@@ -33,6 +37,21 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SeriesIndexRoute = SeriesIndexRouteImport.update({
+  id: '/series/',
+  path: '/series/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthorsIndexRoute = AuthorsIndexRouteImport.update({
+  id: '/authors/',
+  path: '/authors/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SeriesSeriesIdRoute = SeriesSeriesIdRouteImport.update({
+  id: '/series/$seriesId',
+  path: '/series/$seriesId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DemoTanstackQueryRoute = DemoTanstackQueryRouteImport.update({
   id: '/demo/tanstack-query',
   path: '/demo/tanstack-query',
@@ -46,6 +65,11 @@ const DemoTableRoute = DemoTableRouteImport.update({
 const DemoPrismaRoute = DemoPrismaRouteImport.update({
   id: '/demo/prisma',
   path: '/demo/prisma',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthorsAuthorIdRoute = AuthorsAuthorIdRouteImport.update({
+  id: '/authors/$authorId',
+  path: '/authors/$authorId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiConceptsRoute = ApiConceptsRouteImport.update({
@@ -64,9 +88,13 @@ export interface FileRoutesByFullPath {
   '/about': typeof AboutRoute
   '/concepts': typeof ConceptsRoute
   '/api/concepts': typeof ApiConceptsRoute
+  '/authors/$authorId': typeof AuthorsAuthorIdRoute
   '/demo/prisma': typeof DemoPrismaRoute
   '/demo/table': typeof DemoTableRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
+  '/series/$seriesId': typeof SeriesSeriesIdRoute
+  '/authors/': typeof AuthorsIndexRoute
+  '/series/': typeof SeriesIndexRoute
   '/api/authors/openlibrary': typeof ApiAuthorsOpenlibraryRoute
 }
 export interface FileRoutesByTo {
@@ -74,9 +102,13 @@ export interface FileRoutesByTo {
   '/about': typeof AboutRoute
   '/concepts': typeof ConceptsRoute
   '/api/concepts': typeof ApiConceptsRoute
+  '/authors/$authorId': typeof AuthorsAuthorIdRoute
   '/demo/prisma': typeof DemoPrismaRoute
   '/demo/table': typeof DemoTableRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
+  '/series/$seriesId': typeof SeriesSeriesIdRoute
+  '/authors': typeof AuthorsIndexRoute
+  '/series': typeof SeriesIndexRoute
   '/api/authors/openlibrary': typeof ApiAuthorsOpenlibraryRoute
 }
 export interface FileRoutesById {
@@ -85,9 +117,13 @@ export interface FileRoutesById {
   '/about': typeof AboutRoute
   '/concepts': typeof ConceptsRoute
   '/api/concepts': typeof ApiConceptsRoute
+  '/authors/$authorId': typeof AuthorsAuthorIdRoute
   '/demo/prisma': typeof DemoPrismaRoute
   '/demo/table': typeof DemoTableRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
+  '/series/$seriesId': typeof SeriesSeriesIdRoute
+  '/authors/': typeof AuthorsIndexRoute
+  '/series/': typeof SeriesIndexRoute
   '/api/authors/openlibrary': typeof ApiAuthorsOpenlibraryRoute
 }
 export interface FileRouteTypes {
@@ -97,9 +133,13 @@ export interface FileRouteTypes {
     | '/about'
     | '/concepts'
     | '/api/concepts'
+    | '/authors/$authorId'
     | '/demo/prisma'
     | '/demo/table'
     | '/demo/tanstack-query'
+    | '/series/$seriesId'
+    | '/authors/'
+    | '/series/'
     | '/api/authors/openlibrary'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -107,9 +147,13 @@ export interface FileRouteTypes {
     | '/about'
     | '/concepts'
     | '/api/concepts'
+    | '/authors/$authorId'
     | '/demo/prisma'
     | '/demo/table'
     | '/demo/tanstack-query'
+    | '/series/$seriesId'
+    | '/authors'
+    | '/series'
     | '/api/authors/openlibrary'
   id:
     | '__root__'
@@ -117,9 +161,13 @@ export interface FileRouteTypes {
     | '/about'
     | '/concepts'
     | '/api/concepts'
+    | '/authors/$authorId'
     | '/demo/prisma'
     | '/demo/table'
     | '/demo/tanstack-query'
+    | '/series/$seriesId'
+    | '/authors/'
+    | '/series/'
     | '/api/authors/openlibrary'
   fileRoutesById: FileRoutesById
 }
@@ -128,9 +176,13 @@ export interface RootRouteChildren {
   AboutRoute: typeof AboutRoute
   ConceptsRoute: typeof ConceptsRoute
   ApiConceptsRoute: typeof ApiConceptsRoute
+  AuthorsAuthorIdRoute: typeof AuthorsAuthorIdRoute
   DemoPrismaRoute: typeof DemoPrismaRoute
   DemoTableRoute: typeof DemoTableRoute
   DemoTanstackQueryRoute: typeof DemoTanstackQueryRoute
+  SeriesSeriesIdRoute: typeof SeriesSeriesIdRoute
+  AuthorsIndexRoute: typeof AuthorsIndexRoute
+  SeriesIndexRoute: typeof SeriesIndexRoute
   ApiAuthorsOpenlibraryRoute: typeof ApiAuthorsOpenlibraryRoute
 }
 
@@ -157,6 +209,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/series/': {
+      id: '/series/'
+      path: '/series'
+      fullPath: '/series/'
+      preLoaderRoute: typeof SeriesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/authors/': {
+      id: '/authors/'
+      path: '/authors'
+      fullPath: '/authors/'
+      preLoaderRoute: typeof AuthorsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/series/$seriesId': {
+      id: '/series/$seriesId'
+      path: '/series/$seriesId'
+      fullPath: '/series/$seriesId'
+      preLoaderRoute: typeof SeriesSeriesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/demo/tanstack-query': {
       id: '/demo/tanstack-query'
       path: '/demo/tanstack-query'
@@ -176,6 +249,13 @@ declare module '@tanstack/react-router' {
       path: '/demo/prisma'
       fullPath: '/demo/prisma'
       preLoaderRoute: typeof DemoPrismaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/authors/$authorId': {
+      id: '/authors/$authorId'
+      path: '/authors/$authorId'
+      fullPath: '/authors/$authorId'
+      preLoaderRoute: typeof AuthorsAuthorIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/concepts': {
@@ -200,9 +280,13 @@ const rootRouteChildren: RootRouteChildren = {
   AboutRoute: AboutRoute,
   ConceptsRoute: ConceptsRoute,
   ApiConceptsRoute: ApiConceptsRoute,
+  AuthorsAuthorIdRoute: AuthorsAuthorIdRoute,
   DemoPrismaRoute: DemoPrismaRoute,
   DemoTableRoute: DemoTableRoute,
   DemoTanstackQueryRoute: DemoTanstackQueryRoute,
+  SeriesSeriesIdRoute: SeriesSeriesIdRoute,
+  AuthorsIndexRoute: AuthorsIndexRoute,
+  SeriesIndexRoute: SeriesIndexRoute,
   ApiAuthorsOpenlibraryRoute: ApiAuthorsOpenlibraryRoute,
 }
 export const routeTree = rootRouteImport

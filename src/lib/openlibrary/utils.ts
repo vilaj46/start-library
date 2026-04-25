@@ -208,3 +208,40 @@ export function isQualityWork(work: OpenLibraryWork): { valid: boolean; reason?:
 
     return { valid: true };
 }
+
+/**
+ * Attempts to extract series name and order from work metadata.
+ */
+export function detectSeries(work: OpenLibraryWork): { name: string | null; order: number | null } {
+    // 1. Check explicit series field from OpenLibrary
+    if (work.series && work.series.length > 0) {
+        const seriesStr = work.series[0];
+        if (typeof seriesStr === 'string') {
+            const match = seriesStr.match(/^(.*?)(?:,?\s*#?(\d+))?$/);
+            if (match) {
+                return { 
+                    name: match[1].trim(), 
+                    order: match[2] ? parseInt(match[2]) : null 
+                };
+            }
+        }
+    }
+
+    // 2. Heuristic for Harry Potter
+    const title = work.title || "";
+    if (/harry potter/i.test(title)) {
+        const volMatch = title.match(/#(\d+)/) || title.match(/book\s+(\d+)/i);
+        return { 
+            name: "Harry Potter", 
+            order: volMatch ? parseInt(volMatch[1]) : null 
+        };
+    }
+
+    // 3. Heuristic for Cormoran Strike
+    const subjects = (work.subjects || []).map(s => s.toLowerCase());
+    if (subjects.some(s => s.includes("cormoran strike")) || /cormoran strike/i.test(title)) {
+        return { name: "Cormoran Strike", order: null };
+    }
+
+    return { name: null, order: null };
+}
