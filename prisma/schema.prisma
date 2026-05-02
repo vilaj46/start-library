@@ -22,6 +22,7 @@ model Concept {
   notes              String?
   levels             Json?                  @default("[]")
   weight             Float                  @default(1.0)
+  aliases            String[]               @default([])
   rawInput           String?                @map("raw_input")
   metadata           Json?
   isVerified         Boolean                @default(false) @map("is_verified")

@@ -59,5 +59,14 @@ export const WorkRepository = {
             VALUES (${workId}, ${conceptId}, ${similarity})
             ON CONFLICT DO NOTHING;
         `;
+    },
+
+    async updateEmbedding(workId: number, description: string, vectorString: string) {
+        return prisma.$executeRaw`
+            UPDATE works 
+            SET embedding = ${vectorString}::vector,
+                description = ${description}
+            WHERE id = ${workId};
+        `;
     }
 };

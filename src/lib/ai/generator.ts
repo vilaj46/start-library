@@ -122,3 +122,34 @@ Rules:
     return null;
   }
 }
+
+export async function summarizeWork(
+  title: string,
+  description: string
+): Promise<string> {
+  const prompt = `
+Summarize the following book into exactly ONE sentence that captures its core narrative, thematic, and structural elements. 
+Focus on tropes, setting, and the nature of the story, NOT plot points or character names.
+
+TITLE: "${title}"
+DESCRIPTION: ${description}
+
+EXAMPLE OUTPUT: A young orphan discovers he has magical abilities and attends a hidden academy for wizards while being hunted by an ancient dark lord.
+`;
+
+  try {
+    const response = await ollama.chat({
+      model: 'llama3.1',
+      messages: [{ role: 'user', content: prompt }],
+      options: {
+        temperature: 0.1,
+        num_ctx: 4096,
+      }
+    });
+
+    return response.message.content.trim();
+  } catch (e) {
+    console.error("❌ Summarization failed:", e);
+    return description.slice(0, 500); // Fallback to raw truncated description
+  }
+}

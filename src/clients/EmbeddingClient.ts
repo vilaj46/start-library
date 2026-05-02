@@ -42,8 +42,8 @@ export class EmbeddingClient {
      */
     public async fetch(text: string, attempt: number = 1): Promise<number[]> {
         // Truncate text to avoid "context length exceeded" errors in Ollama
-        // mxbai-embed-large limit is ~512 tokens. 6000 chars is a safe buffer.
-        const truncatedText = text.length > 6000 ? text.slice(0, 6000) : text;
+        // mxbai-embed-large limit is ~512 tokens. 3000 chars is a better balance for depth.
+        const truncatedText = text.length > 3000 ? text.slice(0, 3000) : text;
 
         if (this.cache[truncatedText]) {
             return this.cache[truncatedText];

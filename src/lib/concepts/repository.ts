@@ -7,13 +7,14 @@ export const ConceptRepository = {
         return prisma.$queryRaw<{ id: Concept['id'] }[]>`
             INSERT INTO concepts (
                 slug, name, description, category, sub_category,
-                logic, appeal, examples, embedding, raw_input,
+                logic, appeal, examples, aliases, embedding, raw_input,
                 levels, weight, updated_at
             )
             VALUES (
                 ${candidate.slug}, ${candidate.name}, ${candidate.description}, 
                 ${candidate.category}, ${candidate.subCategory},
                 ${candidate.logic}, ${candidate.appeal}, ${candidate.examples},
+                ${candidate.aliases || []},
                 ${vectorString}::vector, 
                 ${deepContext},
                 ${levelsString}::jsonb, 
@@ -99,5 +100,20 @@ export const ConceptRepository = {
         ) c2
         ON CONFLICT DO NOTHING;
     `;
+    },
+
+    async updateMetadata(id: number, data: { description: string, logic: string, appeal: string, examples: string[], aliases: string[], embedding: string, rawInput: string }) {
+        return prisma.$executeRaw`
+            UPDATE concepts
+            SET description = ${data.description},
+                logic = ${data.logic},
+                appeal = ${data.appeal},
+                examples = ${data.examples},
+                aliases = ${data.aliases},
+                embedding = ${data.embedding}::vector,
+                raw_input = ${data.rawInput},
+                updated_at = NOW()
+            WHERE id = ${id};
+        `;
     }
 };

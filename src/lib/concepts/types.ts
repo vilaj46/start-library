@@ -43,6 +43,7 @@ export type Candidate = {
     logic: Concept["logic"];
     appeal: Concept["appeal"];
     examples: Concept["examples"];
+    aliases?: string[];
     notes: Concept["notes"];
     levels: Concept["levels"];
     weight: number;
