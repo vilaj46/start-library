@@ -4,31 +4,27 @@ import { AI_CONFIG } from "#/lib/ai/config";
 export const WorkRepository = {
     async findByTitleAndAuthor(title: string, authorId: number) {
         return prisma.work.findFirst({
-            where: {
-                authorId,
-                title
-            },
-            select: {
-                id: true,
-                title: true,
-                missingCategories: true,
-                workConcepts: { select: { id: true } }
-            }
+            where: { authorId, title },
+            include: { workConcepts: true }
         });
     },
 
-    async createWithoutEmbedding(data: { title: string, description: string, rawApiResponse: any, authorId: number }) {
-        return prisma.work.create({
-            data
-        });
-    },
-
-    async createWithEmbedding(title: string, description: string, rawApiResponse: any, authorId: number, vectorString: string) {
-        const jsonResponse = rawApiResponse ? JSON.stringify(rawApiResponse) : null;
-
+    async createWithEmbedding(
+        title: string,
+        description: string,
+        olRawResponse: any,
+        authorId: number,
+        vectorString: string,
+        meta: { googleRawResponse?: Record<string, unknown> | null } = {}
+    ) {
+        const googleRaw = meta.googleRawResponse ? JSON.stringify(meta.googleRawResponse) : null;
         const res = await prisma.$queryRaw<{ id: number }[]>`
-            INSERT INTO works (title, description, raw_api_response, author_id, embedding)
-            VALUES (${title}, ${description}, ${jsonResponse}::jsonb, ${authorId}, ${vectorString}::vector(1024))
+            INSERT INTO works (title, description, ol_raw_response, author_id, embedding, google_raw_response)
+            VALUES (
+                ${title}, ${description}, ${JSON.stringify(olRawResponse)}::jsonb,
+                ${authorId}, ${vectorString}::vector(1024),
+                ${googleRaw}::jsonb
+            )
             RETURNING id;
         `;
         return res[0];

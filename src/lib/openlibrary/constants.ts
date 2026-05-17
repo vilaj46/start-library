@@ -10,7 +10,8 @@ export const BLACKLIST_KEYWORDS = [
 export const NON_NARRATIVE_TAGS = [
     'exhibition', 'catalog', 'miscellanea', 'history and criticism',
     'juvenile nonfiction', 'study guide', 'sparknotes', 'bibliography',
-    'companion', 'handbook', 'almanac', 'biography'
+    'companion', 'handbook', 'almanac', 'biography',
+    'screenplay', 'film script', 'script',
 ] as const;
 
 export const NON_NARRATIVE_TITLE_PATTERNS = [
@@ -18,7 +19,10 @@ export const NON_NARRATIVE_TITLE_PATTERNS = [
     /the world of/i,
     /companion to/i,
     /guide to/i,
-    /official handbook/i
+    /official handbook/i,
+    /original screenplay/i,
+    /the screenplay/i,
+    /pop.?up/i,
 ] as const;
 
 export const CONTAINER_PATTERNS = [
@@ -29,10 +33,12 @@ export const CONTAINER_PATTERNS = [
     /bundle/i,
     /library/i,
     /anthology/i,
-    /series/i
+    /series/i,
+    /schoolbook/i,
+    /pop.?up/i,
 ] as const;
 
 export const NARRATIVE_KEYWORDS = [
-    'fiction', 'novel', 'stori', 'story', 'literature', 
+    'fiction', 'novel', 'stori', 'story', 'literature',
     'drama', 'poetry', 'myth', 'folklore'
 ] as const;

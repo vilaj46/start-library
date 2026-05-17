@@ -37,10 +37,35 @@ export const isOpenLibraryAuthor = (data: unknown): data is OpenLibraryAuthor =>
 export const isOpenLibraryWork = (obj: unknown): obj is OpenLibraryWork =>
     openLibraryWorkSchema.safeParse(obj).success;
 
+export const BLACKLIST_TITLE_PATTERNS = [
+    /\bcolou?ring\b/i,
+    /\btrivia\b/i,
+    /\bactivity book\b/i,
+    /\bposter book\b/i,
+    /\bsticker book\b/i,
+    /\bjournal\b/i,
+    /\bnotebook\b/i,
+    /\bcookbook\b/i,
+    /\bstudy guide\b/i,
+    /\bcompanion guide\b/i,
+    /\bcalendar\b/i,
+    /\bscreenplay\b/i,
+    /\bfilm script\b/i,
+    /\bpop.?up\b/i,
+    /\bschoolbook/i,
+];
+
+export function matchesTitleBlacklist(title: string): boolean {
+    return BLACKLIST_TITLE_PATTERNS.some(pattern => pattern.test(title));
+}
+
 export const normalizeTitle = (title: string): string =>
     title
-        .replace(/\s*\(hardcover\)|\s*\(paperback\)|\s*\(edition\)/i, ' ')
+        .replace(/\s*\(.*?\)/g, ' ')
+        .replace(/\s*\[.*?\]/g, ' ')
         .replace(/\s+vol(\.?)\s*\d+/i, ' ')
+        .replace(/\s+\d+\/\d+\s*/g, ' ')
+        .replace(/_+/g, ' ')
         .replace(/\s+/g, ' ')
         .replace(/[:.,!?;]+$/, '')
         .trim();
@@ -87,6 +112,24 @@ export const isNarrativeWork = (work: OpenLibraryWork): { isNarrative: boolean; 
 
     if (NON_NARRATIVE_TITLE_PATTERNS.some(pattern => pattern.test(title))) {
         return { isNarrative: false, reason: "Companion title pattern detected" };
+    }
+
+    // Halo Effect guard — reject if subjects actively signal non-genre fiction with no genre signal
+    const GENRE_SIGNALS = [
+        'fantasy', 'science fiction', 'sci-fi', 'horror', 'magic', 'wizard',
+        'witch', 'supernatural', 'dystopia', 'speculative', 'paranormal', 'mythic',
+    ];
+    const NON_GENRE_SIGNALS = [
+        'detective', 'mystery', 'crime fiction', 'thriller', 'drama',
+        'contemporary fiction', 'political fiction', 'literary fiction', 'realism',
+        'domestic fiction', 'social fiction',
+        'city council', 'local elections', 'city and town life', 'village life',
+        'private investigator', 'private detective', 'noir',
+    ];
+    const hasGenreSignal = subjects.some(s => GENRE_SIGNALS.some(g => s.includes(g)));
+    const hasNonGenreSignal = subjects.some(s => NON_GENRE_SIGNALS.some(g => s.includes(g)));
+    if (!hasGenreSignal && hasNonGenreSignal && subjects.length >= 1) {
+        return { isNarrative: false, reason: "Halo effect — non-genre signals present, no fantasy/sci-fi/horror signal" };
     }
 
     const isExplicitNarrative = subjects.some(s =>
@@ -136,6 +179,10 @@ export const isQualityWork = (work: OpenLibraryWork): { valid: boolean; reason?:
     if (/part \d+ of \d+/i.test(title)) {
         return { valid: false, reason: "Split-volume work detected in title" };
     }
+
+    const titleLower = title.toLowerCase();
+    const hitKeyword = BLACKLIST_KEYWORDS.find(kw => titleLower.includes(kw));
+    if (hitKeyword) return { valid: false, reason: `Blacklisted keyword in title: "${hitKeyword}"` };
 
     const ontologyResult = isGoodForOntology(work);
     if (!ontologyResult.valid) return ontologyResult;

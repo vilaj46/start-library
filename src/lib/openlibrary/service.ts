@@ -1,11 +1,15 @@
 import { prisma } from "#/db";
+import { embeddingClient } from "#/lib/ai/embedding";
 import { openLibraryClient } from "#/lib/openlibrary/client";
+import { GoogleBooksClient } from "#/clients/GoogleBooksClient";
 import { AuthorRepository } from "#/db/authors/repository";
 import { WorkRepository } from "#/db/works/repository";
-import { WorkService } from "#/lib/works/service";
 import type { OpenLibraryId } from "#/lib/openlibrary/schema";
-import { extractText } from "#/lib/openlibrary/utils";
-import { isValidGenre, generateWorkEmbedding } from "#/lib/ai/utils";
+import { detectSeries, extractText, isQualityWork, matchesTitleBlacklist, normalizeTitle } from "#/lib/openlibrary/utils";
+import { enrichAuthorBiography, summarizeWork } from "#/lib/ai/generator";
+import { VectorMath } from "#/lib/math";
+
+const googleBooksClient = new GoogleBooksClient();
 
 export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
     const olAuthor = await openLibraryClient.fetchAuthorById(openLibraryId);
@@ -13,10 +17,14 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
         throw new Error(`Author not found for id: ${openLibraryId}`);
     }
 
+    const rawBio = extractText(olAuthor.bio) || '';
+    console.log(`✍️  Enriching biography for "${olAuthor.name}"...`);
+    const enrichedBio = await enrichAuthorBiography(rawBio, olAuthor.name);
+
     const author = await AuthorRepository.findOrCreate({
         openLibraryId,
         name: olAuthor.name,
-        bio: extractText(olAuthor.bio),
+        bio: enrichedBio,
         rawApiResponse: olAuthor
     });
 
@@ -25,28 +33,145 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
     for (const olWork of olWorks) {
         if (!olWork.title) continue;
 
-        let work = await WorkRepository.findByTitleAndAuthor(olWork.title, author.id);
+        // Stage 1: Full quality + narrative filter before any DB or AI work
+        const qualityCheck = isQualityWork(olWork);
+        if (!qualityCheck.valid) {
+            console.log(`🗑️  Skipping "${olWork.title}": ${qualityCheck.reason}`);
+            continue;
+        }
+        if (matchesTitleBlacklist(olWork.title)) {
+            console.log(`🚫 Blacklisted title skipped: "${olWork.title}"`);
+            continue;
+        }
 
-        if (work && work.missingCategories.length === 0) continue;
+        // Use normalized title for dedup so edition/format variants collapse to one record
+        const normalizedTitle = normalizeTitle(olWork.title);
 
-        const description = extractText(olWork.description);
+        // Google Books verification — canonical title, secondary genre check
+        const gbResult = await googleBooksClient.verifyWork(normalizedTitle, olAuthor.name);
 
-        if (!(await isValidGenre(olWork, description))) continue;
+        let canonicalTitle = normalizedTitle;
+        let googleCategories: string[] = [];
+        let googleDescription: string | null = null;
+        let googleRaw: Record<string, unknown> | null = null;
 
-        const vectorString = await generateWorkEmbedding(olWork, description);
-        if (!vectorString) continue;
+        if (gbResult.matched) {
+            canonicalTitle = gbResult.canonicalTitle;
+            googleCategories = gbResult.categories;
+            googleDescription = gbResult.description;
+            googleRaw = gbResult.raw;
+            console.log(`📚 Google Books matched "${normalizedTitle}" → "${canonicalTitle}" (score: ${gbResult.matchScore.toFixed(2)}, categories: [${googleCategories.join(', ') || 'none'}])`);
 
-        const persistedWork = await WorkService.syncWorkWithEmbedding(work, olWork, description, author.id, vectorString);
+            // Secondary genre veto: Google has categories AND they're all non-genre
+            if (googleCategories.length > 0) {
+                const hasGenre = googleCategories.some(c =>
+                    /fantasy|horror|sci.fi|science fiction|speculative|paranormal|supernatural|magic/i.test(c)
+                );
+                const hasNonGenre = googleCategories.some(c =>
+                    /crime|thriller|mystery|drama|contemporary|literary|detective|noir/i.test(c)
+                );
+                if (!hasGenre && hasNonGenre) {
+                    console.log(`🚫 Google Books genre veto: "${canonicalTitle}" — [${googleCategories.join(', ')}]`);
+                    continue;
+                }
+            }
+        } else {
+            console.log(`⚠️  Google Books: no match for "${normalizedTitle}" — proceeding with OL data`);
+        }
 
-        await WorkService.linkSeries(persistedWork.id, olWork);
+        let work: any = await WorkRepository.findByTitleAndAuthor(canonicalTitle, author.id);
 
-        const currentMissingCategories = await WorkService.evaluateAndLinkConcepts(persistedWork.id, persistedWork.title, vectorString);
+        // Only skip if the work already has 3 or more concepts (fully enriched)
+        if (work && work.workConcepts.length >= 3) continue;
 
-        if (currentMissingCategories.length > 0) {
-            await prisma.work.update({
-                where: { id: persistedWork.id },
-                data: { missingCategories: currentMissingCategories }
-            });
+        const olDescription = (typeof olWork.description === 'string'
+            ? olWork.description
+            : olWork.description?.value) || "";
+
+        // Prefer Google Books description — it's cleaner and more standardised than OL.
+        const description = (googleDescription && googleDescription.length > olDescription.length)
+            ? googleDescription
+            : olDescription;
+
+        // Summarize into a clean thematic blurb for the embedding vector.
+        console.log(`🧠 Summarizing "${olWork.title}" for thematic cleaning...`);
+        const thematicSummary = await summarizeWork(olWork.title, description || "No description provided.");
+
+        const limitedSubjects = (olWork.subjects || []).slice(0, 40).join(', ');
+
+        // Build embedding text: thematic summary + OL subjects + Google categories.
+        const categoriesText = googleCategories.length > 0 ? ` Genres: ${googleCategories.join(', ')}.` : '';
+        const workText = `Summary: ${thematicSummary}. Subjects: ${limitedSubjects}.${categoriesText}`;
+        const [workEmbedding] = await embeddingClient.fetchBatch([workText]);
+
+        if (!workEmbedding || workEmbedding.length === 0) continue;
+
+        const vectorString = VectorMath.toVectorString(workEmbedding);
+
+        // Transatlantic Collapser: cosine dedup for regional title variants
+        if (!work) {
+            const [nearDuplicate] = await prisma.$queryRaw<{ id: number; title: string; similarity: number }[]>`
+                SELECT id, title, 1 - (embedding <=> ${vectorString}::vector) AS similarity
+                FROM works
+                WHERE author_id = ${author.id} AND embedding IS NOT NULL
+                ORDER BY embedding <=> ${vectorString}::vector ASC
+                LIMIT 1;
+            `;
+            if (nearDuplicate && nearDuplicate.similarity > 0.94) {
+                console.log(`🔀 Transatlantic duplicate detected: "${olWork.title}" ≈ "${nearDuplicate.title}" (sim: ${nearDuplicate.similarity.toFixed(4)}) — skipping`);
+                continue;
+            }
+        }
+
+        const seriesInfo = detectSeries(olWork);
+
+        if (!work) {
+            const created = await WorkRepository.createWithEmbedding(
+                canonicalTitle,
+                description,
+                olWork,
+                author.id,
+                vectorString,
+                { googleRawResponse: googleRaw }
+            );
+            work = { id: created.id, ...olWork };
+        } else {
+            await WorkRepository.updateEmbedding(work.id, description, vectorString);
+        }
+
+        if (seriesInfo.name) {
+            await WorkRepository.linkSeries(work.id, seriesInfo.name, seriesInfo.order);
+        }
+
+        if (!work) continue;
+
+        // Fetch Top 8 closest concepts for semantic depth
+        const closestConcepts = await prisma.$queryRaw<{ id: number, similarity: number, name: string }[]>`
+            SELECT id, name, 1 - (embedding <=> ${vectorString}::vector) as similarity
+            FROM concepts
+            ORDER BY embedding <=> ${vectorString}::vector ASC
+            LIMIT 8;
+        `;
+
+        console.log(`🔍 Top matches for "${work.title}":`, closestConcepts.slice(0, 3).map(c => `${c.name} (${c.similarity.toFixed(4)})`).join(', '));
+
+        let bestSimilarity = 0;
+
+        const primaryMatches = closestConcepts.filter(c => c.similarity >= 0.65);
+
+        if (primaryMatches.length > 0) {
+            for (const match of primaryMatches) {
+                await WorkRepository.linkConcept(work.id, match.id, match.similarity);
+                console.log(`🔗 Linked Concept (T1): "${match.name}" (Sim: ${match.similarity.toFixed(3)})`);
+                if (match.similarity > bestSimilarity) bestSimilarity = match.similarity;
+            }
+        } else {
+            const fallbackMatches = closestConcepts.filter(c => c.similarity >= 0.60);
+            for (const match of fallbackMatches) {
+                await WorkRepository.linkConcept(work.id, match.id, match.similarity);
+                console.log(`🔗 Linked Concept (T2 Fallback): "${match.name}" (Sim: ${match.similarity.toFixed(3)})`);
+                if (match.similarity > bestSimilarity) bestSimilarity = match.similarity;
+            }
         }
     }
 
