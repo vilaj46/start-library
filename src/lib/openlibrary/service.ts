@@ -147,7 +147,7 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
             );
             work = { id: created.id, ...olWork };
         } else {
-            await WorkRepository.updateEmbedding(work.id, description, vectorString);
+            await WorkRepository.updateEmbedding(work.id, description, vectorString, structuredTags);
         }
 
         if (seriesInfo.name) {

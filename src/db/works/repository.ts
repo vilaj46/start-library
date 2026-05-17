@@ -64,11 +64,13 @@ export const WorkRepository = {
         `;
     },
 
-    async updateEmbedding(workId: number, description: string, vectorString: string) {
+    async updateEmbedding(workId: number, description: string, vectorString: string, structuredTags?: Record<string, string[]> | null) {
+        const tagsJson = structuredTags ? JSON.stringify(structuredTags) : null;
         return prisma.$executeRaw`
-            UPDATE works 
+            UPDATE works
             SET embedding = ${vectorString}::vector(1024),
-                description = ${description}
+                description = ${description},
+                structured_tags = COALESCE(${tagsJson}::jsonb, structured_tags)
             WHERE id = ${workId};
         `;
     },

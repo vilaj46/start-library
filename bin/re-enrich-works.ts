@@ -13,15 +13,21 @@ import { AuthorRepository } from "../src/db/authors/repository";
 const olId = process.argv[2]?.startsWith('OL') ? process.argv[2] : undefined;
 const isDry = process.argv.includes('--dry');
 
-async function reenrichWork(work: { id: number; title: string; description: string | null }) {
+async function reenrichWork(work: { id: number; title: string; description: string | null; structuredTags: any }) {
     const description = work.description || "";
     if (!description) {
         console.log(`  ⚠️  Skipping "${work.title}" — no description`);
         return false;
     }
 
-    const thematicSummary = await summarizeWork(work.title, description);
-    const structuredTags = await tagWorkStructurally(work.title, thematicSummary);
+    // Reuse existing tags if already generated — skip the LLM call
+    let structuredTags = work.structuredTags as { narrative: string[]; world: string[]; character: string[]; system: string[]; genre: string[] } | null;
+    if (structuredTags) {
+        console.log(`  ♻️  Reusing existing structured tags`);
+    } else {
+        const thematicSummary = await summarizeWork(work.title, description);
+        structuredTags = await tagWorkStructurally(work.title, thematicSummary);
+    }
 
     const tagText = [
         structuredTags.narrative.length ? `Narrative: ${structuredTags.narrative.join(', ')}.` : '',
@@ -112,7 +118,7 @@ async function main() {
 
     const works = await prisma.work.findMany({
         where: whereClause,
-        select: { id: true, title: true, description: true, author: { select: { id: true, name: true, openLibraryId: true } } },
+        select: { id: true, title: true, description: true, structuredTags: true, author: { select: { id: true, name: true, openLibraryId: true } } },
         orderBy: { id: 'asc' },
     });
 
