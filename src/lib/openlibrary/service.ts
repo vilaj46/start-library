@@ -1,15 +1,16 @@
 import { prisma } from "#/db";
 import { EmbeddingClient } from "#/clients/EmbeddingClient";
 import { OpenLibraryClient } from "#/clients/OpenLibraryClient";
+import { GoogleBooksClient } from "#/clients/GoogleBooksClient";
 import { AuthorRepository } from "../authors/repository";
 import { WorkRepository } from "../works/repository";
 import type { OpenLibraryId } from "./types";
-import { detectSeries } from "./utils";
-import { summarizeWork } from "../ai/generator";
+import { detectSeries, isQualityWork, matchesTitleBlacklist, normalizeTitle } from "./utils";
+import { enrichAuthorBiography, summarizeWork } from "../ai/generator";
 
 const embeddingClient = new EmbeddingClient();
-
 const openLibraryClient = new OpenLibraryClient();
+const googleBooksClient = new GoogleBooksClient();
 
 export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
     const olAuthor = await openLibraryClient.fetchAuthorById(openLibraryId);
@@ -17,10 +18,14 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
         throw new Error(`Author not found for ud: ${openLibraryId}`);
     }
 
+    const rawBio = openLibraryClient.extractText(olAuthor.bio) || '';
+    console.log(`✍️  Enriching biography for "${olAuthor.name}"...`);
+    const enrichedBio = await enrichAuthorBiography(rawBio, olAuthor.name);
+
     const author = await AuthorRepository.findOrCreate({
         openLibraryId,
         name: olAuthor.name,
-        bio: openLibraryClient.extractText(olAuthor.bio),
+        bio: enrichedBio,
         rawApiResponse: olAuthor
     });
 
@@ -29,14 +34,66 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
     for (const olWork of olWorks) {
         if (!olWork.title) continue;
 
-        let work: any = await WorkRepository.findByTitleAndAuthor(olWork.title, author.id);
+        // Stage 1: Full quality + narrative filter before any DB or AI work
+        const qualityCheck = isQualityWork(olWork);
+        if (!qualityCheck.valid) {
+            console.log(`🗑️  Skipping "${olWork.title}": ${qualityCheck.reason}`);
+            continue;
+        }
+        if (matchesTitleBlacklist(olWork.title)) {
+            console.log(`🚫 Blacklisted title skipped: "${olWork.title}"`);
+            continue;
+        }
+
+        // Use normalized title for dedup so edition/format variants collapse to one record
+        const normalizedTitle = normalizeTitle(olWork.title);
+
+        // Google Books verification — canonical title, ISBN, secondary genre check
+        const gbResult = await googleBooksClient.verifyWork(normalizedTitle, olAuthor.name);
+
+        let canonicalTitle = normalizedTitle;
+        let googleCategories: string[] = [];
+        let googleDescription: string | null = null;
+        let googleRaw: Record<string, unknown> | null = null;
+
+        if (gbResult.matched) {
+            canonicalTitle = gbResult.canonicalTitle;
+            googleCategories = gbResult.categories;
+            googleDescription = gbResult.description;
+            googleRaw = gbResult.raw;
+            console.log(`📚 Google Books matched "${normalizedTitle}" → "${canonicalTitle}" (score: ${gbResult.matchScore.toFixed(2)}, categories: [${googleCategories.join(', ') || 'none'}])`);
+
+            // Secondary genre veto: Google has categories AND they're all non-genre
+            if (googleCategories.length > 0) {
+                const hasGenre = googleCategories.some(c =>
+                    /fantasy|horror|sci.fi|science fiction|speculative|paranormal|supernatural|magic/i.test(c)
+                );
+                const hasNonGenre = googleCategories.some(c =>
+                    /crime|thriller|mystery|drama|contemporary|literary|detective|noir/i.test(c)
+                );
+                if (!hasGenre && hasNonGenre) {
+                    console.log(`🚫 Google Books genre veto: "${canonicalTitle}" — [${googleCategories.join(', ')}]`);
+                    continue;
+                }
+            }
+        } else {
+            console.log(`⚠️  Google Books: no match for "${normalizedTitle}" — proceeding with OL data`);
+        }
+
+        let work: any = await WorkRepository.findByTitleAndAuthor(canonicalTitle, author.id);
 
         // Only skip if the work already has 3 or more concepts (fully enriched)
         if (work && work.workConcepts.length >= 3) continue;
 
-        const description = (typeof olWork.description === 'string'
+        const olDescription = (typeof olWork.description === 'string'
             ? olWork.description
             : olWork.description?.value) || "";
+
+        // Prefer Google Books description — it's cleaner and more standardised than OL.
+        // Fall back to OL if Google had no match or returned no description.
+        const description = (googleDescription && googleDescription.length > olDescription.length)
+            ? googleDescription
+            : olDescription;
 
         // Clean the "Book Vector" by using AI to summarize the noisy description into a thematic blurb.
         console.log(`🧠 Summarizing "${olWork.title}" for thematic cleaning...`);
@@ -44,24 +101,44 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
 
         const limitedSubjects = (olWork.subjects || []).slice(0, 40).join(', ');
 
-        // The "Clean Vector" approach: Summary + Subjects.
-        const workText = `Summary: ${thematicSummary}. Subjects: ${limitedSubjects}.`;
+        // Build embedding text: thematic summary + OL subjects + Google categories.
+        // Google categories act as a standardised genre signal that steers concept matching.
+        const categoriesText = googleCategories.length > 0 ? ` Genres: ${googleCategories.join(', ')}.` : '';
+        const workText = `Summary: ${thematicSummary}. Subjects: ${limitedSubjects}.${categoriesText}`;
         const [workEmbedding] = await embeddingClient.fetchBatch([workText]);
 
         if (!workEmbedding || workEmbedding.length === 0) continue;
 
         const vectorString = embeddingClient.toVectorString(workEmbedding);
 
+        // Stage 1 (Transatlantic Collapser): check if a near-identical work already exists
+        // under this author by cosine similarity (catches regional title variants like
+        // "Philosopher's Stone" vs "Sorcerer's Stone")
+        if (!work) {
+            const [nearDuplicate] = await prisma.$queryRaw<{ id: number; title: string; similarity: number }[]>`
+                SELECT id, title, 1 - (embedding <=> ${vectorString}::vector) AS similarity
+                FROM works
+                WHERE author_id = ${author.id} AND embedding IS NOT NULL
+                ORDER BY embedding <=> ${vectorString}::vector ASC
+                LIMIT 1;
+            `;
+            if (nearDuplicate && nearDuplicate.similarity > 0.94) {
+                console.log(`🔀 Transatlantic duplicate detected: "${olWork.title}" ≈ "${nearDuplicate.title}" (sim: ${nearDuplicate.similarity.toFixed(4)}) — skipping`);
+                continue;
+            }
+        }
+
         const seriesInfo = detectSeries(olWork);
 
         // If the work record didn't exist, create it now.
         if (!work) {
             const created = await WorkRepository.createWithEmbedding(
-                olWork.title,
+                canonicalTitle,
                 description,
                 olWork,
                 author.id,
-                vectorString
+                vectorString,
+                { googleRawResponse: googleRaw }
             );
             work = { id: created.id, ...olWork };
         } else {

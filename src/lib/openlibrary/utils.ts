@@ -47,26 +47,49 @@ export function isOpenLibraryWork(obj: unknown): obj is OpenLibraryWork {
 }
 
 export const BLACKLIST_KEYWORDS = [
-    'sparknotes', 'cliffnotes', "cliff's notes", 'summary of', 'study guide', 
-    'workbook', 'analysis of', 'audiobook', 'audio cd', 'cassette', 
-    'large print', 'library binding', 'box set', 'complete set', 'collection', 
-    'omnibus', 'bundle', 'anthology', 'series', 'selected works', 'works of', 
-    'the works of', 'journal', 'diary', 'notebook', 'pop-up', 'gallery of', 
+    'sparknotes', 'cliffnotes', "cliff's notes", 'summary of', 'study guide',
+    'workbook', 'analysis of', 'audiobook', 'audio cd', 'cassette',
+    'large print', 'library binding', 'box set', 'complete set', 'collection',
+    'omnibus', 'bundle', 'anthology', 'series', 'selected works', 'works of',
+    'the works of', 'journal', 'diary', 'notebook', 'pop-up', 'gallery of',
     'coloring book', 'activity book', 'sticker book', 'schoolbooks'
 ];
 
+export const BLACKLIST_TITLE_PATTERNS = [
+    /\bcolou?ring\b/i,
+    /\btrivia\b/i,
+    /\bactivity book\b/i,
+    /\bposter book\b/i,
+    /\bsticker book\b/i,
+    /\bjournal\b/i,
+    /\bnotebook\b/i,
+    /\bcookbook\b/i,
+    /\bstudy guide\b/i,
+    /\bcompanion guide\b/i,
+    /\bcalendar\b/i,
+    /\bscreenplay\b/i,
+    /\bfilm script\b/i,
+    /\bpop.?up\b/i,
+    /\bschoolbook/i,
+];
+
+export function matchesTitleBlacklist(title: string): boolean {
+    return BLACKLIST_TITLE_PATTERNS.some(pattern => pattern.test(title));
+}
+
 /**
- * Strips common metadata noise from titles for better deduplication.
+ * Strips ALL parenthetical/bracketed noise and edition qualifiers for dedup keying.
+ * Used only for DB lookup — never stored as the display title.
  */
 export function normalizeTitle(title: string): string {
     return title
-        .replace(/\s*\(.*?\)\s*/g, ' ') // Remove content in parentheses e.g. (English Edition)
-        .replace(/\s*\[.*?\]\s*/g, ' ') // Remove content in brackets e.g. [Hardcover]
-        .replace(/\s+\d+\/\d+\s*/g, ' ') // Remove split volumes like 1/2, 2/5
-        .replace(/\s+vol(\.?)\s*\d+/i, ' ') // Remove Vol 1, Vol. 2
-        .trim()                         // Trim before stripping trailing punctuation
-        .replace(/[:.,!?;]$/, '')       // Remove trailing punctuation
-        .replace(/\s+/g, ' ')           // Collapse whitespace
+        .replace(/\s*\(.*?\)/g, ' ')       // strip ALL parenthetical content e.g. (Full-Cast Edition)
+        .replace(/\s*\[.*?\]/g, ' ')       // strip all bracketed content e.g. [Illustrated]
+        .replace(/\s+vol(\.?)\s*\d+/i, ' ')
+        .replace(/\s+\d+\/\d+\s*/g, ' ')   // split volumes e.g. 1/2
+        .replace(/_+/g, ' ')               // underscore subtitle separators e.g. Title_Subtitle
+        .replace(/\s+/g, ' ')
+        .replace(/[:.,!?;]+$/, '')
         .trim();
 }
 
@@ -76,8 +99,9 @@ export function isGoodForOntology(work: OpenLibraryWork): { valid: boolean; reas
     
     // 1. Check for "Container" keywords
     const junkPatterns = [
-        /box set/i, /complete set/i, /collection/i, /omnibus/i, 
-        /bundle/i, /library/i, /anthology/i, /series/i
+        /box set/i, /complete set/i, /collection/i, /omnibus/i,
+        /bundle/i, /library/i, /anthology/i, /series/i,
+        /schoolbook/i, /pop.?up/i,
     ];
 
     if (junkPatterns.some(p => p.test(title) || p.test(subtitle))) {
@@ -113,7 +137,8 @@ export function isNarrativeWork(work: OpenLibraryWork): { isNarrative: boolean; 
     const blacklistedTags = [
         'exhibition', 'catalog', 'miscellanea', 'history and criticism',
         'juvenile nonfiction', 'study guide', 'sparknotes', 'bibliography',
-        'companion', 'handbook', 'almanac', 'biography'
+        'companion', 'handbook', 'almanac', 'biography',
+        'screenplay', 'film script', 'script',
     ];
 
     if (subjects.some(s => blacklistedTags.some(tag => s.includes(tag)))) {
@@ -126,14 +151,35 @@ export function isNarrativeWork(work: OpenLibraryWork): { isNarrative: boolean; 
         /the world of/i,
         /companion to/i,
         /guide to/i,
-        /official handbook/i
+        /official handbook/i,
+        /original screenplay/i,
+        /the screenplay/i,
+        /pop.?up/i,
     ];
 
     if (nonNarrativeTitlePatterns.some(pattern => pattern.test(title))) {
-        return { isNarrative: false, reason: "Companion title pattern detected" };
+        return { isNarrative: false, reason: "Companion/format title pattern detected" };
     }
 
-    // 3. Subject Density Check
+    // 3. Halo Effect guard — reject if subjects actively signal non-genre fiction with no genre signal
+    const GENRE_SIGNALS = [
+        'fantasy', 'science fiction', 'sci-fi', 'horror', 'magic', 'wizard',
+        'witch', 'supernatural', 'dystopia', 'speculative', 'paranormal', 'mythic',
+    ];
+    const NON_GENRE_SIGNALS = [
+        'detective', 'mystery', 'crime fiction', 'thriller', 'drama',
+        'contemporary fiction', 'political fiction', 'literary fiction', 'realism',
+        'domestic fiction', 'social fiction',
+        'city council', 'local elections', 'city and town life', 'village life',
+        'private investigator', 'private detective', 'noir',
+    ];
+    const hasGenreSignal = subjects.some(s => GENRE_SIGNALS.some(g => s.includes(g)));
+    const hasNonGenreSignal = subjects.some(s => NON_GENRE_SIGNALS.some(g => s.includes(g)));
+    if (!hasGenreSignal && hasNonGenreSignal && subjects.length >= 1) {
+        return { isNarrative: false, reason: "Halo effect — non-genre signals present, no fantasy/sci-fi/horror signal" };
+    }
+
+    // 4. Subject Density Check
     const isFiction = subjects.some(s => s.includes('fiction') || s.includes('novel') || s.includes('stories'));
     if (!isFiction && subjects.length > 5) {
         return { isNarrative: false, reason: "High metadata density without 'fiction' tag" };
@@ -176,6 +222,11 @@ export function isQualityWork(work: OpenLibraryWork): { valid: boolean; reason?:
     // Latin script check (Initial coarse filter)
     const nonLatinRegex = /[^\x00-\x7F\u00C0-\u017F\u2000-\u206F\u2070-\u209F\u2200-\u22FF]/;
     if (nonLatinRegex.test(title)) return { valid: false, reason: "Non-Latin script title" };
+
+    // BLACKLIST_KEYWORDS check on title
+    const titleLower = title.toLowerCase();
+    const hitKeyword = BLACKLIST_KEYWORDS.find(kw => titleLower.includes(kw));
+    if (hitKeyword) return { valid: false, reason: `Blacklisted keyword in title: "${hitKeyword}"` };
 
     const ontologyResult = isGoodForOntology(work);
     if (!ontologyResult.valid) return ontologyResult;

@@ -1,6 +1,6 @@
 // Environment variables are loaded via dotenv-cli
-import { processOpenLibraryAuthor } from "./src/lib/openlibrary/service";
-import { prisma } from "./src/db";
+import { processOpenLibraryAuthor } from "../src/lib/openlibrary/service";
+import { prisma } from "../src/db";
 
 async function main() {
     try {
