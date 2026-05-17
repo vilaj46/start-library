@@ -15,15 +15,16 @@ export const WorkRepository = {
         olRawResponse: any,
         authorId: number,
         vectorString: string,
-        meta: { googleRawResponse?: Record<string, unknown> | null } = {}
+        meta: { googleRawResponse?: Record<string, unknown> | null; structuredTags?: Record<string, string[]> | null } = {}
     ) {
         const googleRaw = meta.googleRawResponse ? JSON.stringify(meta.googleRawResponse) : null;
+        const tagsJson = meta.structuredTags ? JSON.stringify(meta.structuredTags) : null;
         const res = await prisma.$queryRaw<{ id: number }[]>`
-            INSERT INTO works (title, description, ol_raw_response, author_id, embedding, google_raw_response)
+            INSERT INTO works (title, description, ol_raw_response, author_id, embedding, google_raw_response, structured_tags)
             VALUES (
                 ${title}, ${description}, ${JSON.stringify(olRawResponse)}::jsonb,
                 ${authorId}, ${vectorString}::vector(1024),
-                ${googleRaw}::jsonb
+                ${googleRaw}::jsonb, ${tagsJson}::jsonb
             )
             RETURNING id;
         `;

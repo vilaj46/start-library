@@ -6,7 +6,7 @@ import { AuthorRepository } from "#/db/authors/repository";
 import { WorkRepository } from "#/db/works/repository";
 import type { OpenLibraryId } from "#/lib/openlibrary/schema";
 import { detectSeries, extractText, isQualityWork, matchesTitleBlacklist, normalizeTitle } from "#/lib/openlibrary/utils";
-import { enrichAuthorBiography, summarizeWork } from "#/lib/ai/generator";
+import { enrichAuthorBiography, summarizeWork, tagWorkStructurally } from "#/lib/ai/generator";
 import { VectorMath } from "#/lib/math";
 
 const googleBooksClient = new GoogleBooksClient();
@@ -93,15 +93,26 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
             ? googleDescription
             : olDescription;
 
-        // Summarize into a clean thematic blurb for the embedding vector.
-        console.log(`🧠 Summarizing "${olWork.title}" for thematic cleaning...`);
+        // Summarize into a clean thematic blurb, then tag structurally.
+        console.log(`🧠 Summarizing "${olWork.title}"...`);
         const thematicSummary = await summarizeWork(olWork.title, description || "No description provided.");
 
-        const limitedSubjects = (olWork.subjects || []).slice(0, 40).join(', ');
+        console.log(`🏷️  Tagging "${olWork.title}" structurally...`);
+        const structuredTags = await tagWorkStructurally(olWork.title, thematicSummary);
 
-        // Build embedding text: thematic summary + OL subjects + Google categories.
+        // Build embedding text from structured tags — mirrors how concepts are described
+        // (by mechanics and appeal rather than plot), giving better vector space alignment.
+        const tagText = [
+            structuredTags.narrative.length ? `Narrative: ${structuredTags.narrative.join(', ')}.` : '',
+            structuredTags.world.length     ? `World: ${structuredTags.world.join(', ')}.` : '',
+            structuredTags.character.length ? `Characters: ${structuredTags.character.join(', ')}.` : '',
+            structuredTags.system.length    ? `Systems: ${structuredTags.system.join(', ')}.` : '',
+            structuredTags.genre.length     ? `Genre: ${structuredTags.genre.join(', ')}.` : '',
+        ].filter(Boolean).join(' ');
+
+        const limitedSubjects = (olWork.subjects || []).slice(0, 40).join(', ');
         const categoriesText = googleCategories.length > 0 ? ` Genres: ${googleCategories.join(', ')}.` : '';
-        const workText = `Summary: ${thematicSummary}. Subjects: ${limitedSubjects}.${categoriesText}`;
+        const workText = `${tagText} Subjects: ${limitedSubjects}.${categoriesText}`;
         const [workEmbedding] = await embeddingClient.fetchBatch([workText]);
 
         if (!workEmbedding || workEmbedding.length === 0) continue;
@@ -132,7 +143,7 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
                 olWork,
                 author.id,
                 vectorString,
-                { googleRawResponse: googleRaw }
+                { googleRawResponse: googleRaw, structuredTags }
             );
             work = { id: created.id, ...olWork };
         } else {
@@ -145,35 +156,48 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
 
         if (!work) continue;
 
-        // Fetch Top 8 closest concepts — embedding already encodes genre/theme from
-        // the summary + subjects + Google categories, so the cosine similarity handles
-        // category alignment naturally. HNSW index makes this sub-linear.
-        const closestConcepts = await prisma.$queryRaw<{ id: number, similarity: number, name: string }[]>`
-            SELECT id, name, 1 - (embedding <=> ${vectorString}::vector) as similarity
-            FROM concepts
-            ORDER BY embedding <=> ${vectorString}::vector ASC
-            LIMIT 8;
+        // Two-stage concept search:
+        // Stage 1 — HNSW finds top 50 globally, CTE discovers the 3 strongest categories.
+        // Stage 2 — Returns top 3 concepts per category (up to 9 total), ensuring coverage
+        //           across narrative, world, character etc. rather than one category dominating.
+        const closestConcepts = await prisma.$queryRaw<{ id: number, name: string, category: string, similarity: number }[]>`
+            WITH candidate_pool AS (
+                SELECT id, name, category,
+                       1 - (embedding <=> ${vectorString}::vector) AS similarity
+                FROM concepts
+                WHERE embedding IS NOT NULL
+                ORDER BY embedding <=> ${vectorString}::vector ASC
+                LIMIT 50
+            ),
+            top_categories AS (
+                SELECT category
+                FROM candidate_pool
+                GROUP BY category
+                ORDER BY MAX(similarity) DESC
+                LIMIT 3
+            ),
+            ranked AS (
+                SELECT cp.id, cp.name, cp.category, cp.similarity,
+                       ROW_NUMBER() OVER (PARTITION BY cp.category ORDER BY cp.similarity DESC) AS rn
+                FROM candidate_pool cp
+                INNER JOIN top_categories tc ON cp.category = tc.category
+            )
+            SELECT id, name, category, similarity
+            FROM ranked
+            WHERE rn <= 3
+            ORDER BY similarity DESC;
         `;
 
-        console.log(`🔍 Top matches for "${work.title}":`, closestConcepts.slice(0, 3).map(c => `${c.name} (${c.similarity.toFixed(4)})`).join(', '));
-
-        let bestSimilarity = 0;
+        console.log(`🔍 Top matches for "${work.title}":`, closestConcepts.slice(0, 3).map(c => `${c.name} [${c.category}] (${c.similarity.toFixed(4)})`).join(', '));
 
         const primaryMatches = closestConcepts.filter(c => c.similarity >= 0.65);
+        const toLink = primaryMatches.length > 0
+            ? primaryMatches
+            : closestConcepts.filter(c => c.similarity >= 0.60);
 
-        if (primaryMatches.length > 0) {
-            for (const match of primaryMatches) {
-                await WorkRepository.linkConcept(work.id, match.id, match.similarity);
-                console.log(`🔗 Linked Concept (T1): "${match.name}" (Sim: ${match.similarity.toFixed(3)})`);
-                if (match.similarity > bestSimilarity) bestSimilarity = match.similarity;
-            }
-        } else {
-            const fallbackMatches = closestConcepts.filter(c => c.similarity >= 0.60);
-            for (const match of fallbackMatches) {
-                await WorkRepository.linkConcept(work.id, match.id, match.similarity);
-                console.log(`🔗 Linked Concept (T2 Fallback): "${match.name}" (Sim: ${match.similarity.toFixed(3)})`);
-                if (match.similarity > bestSimilarity) bestSimilarity = match.similarity;
-            }
+        for (const match of toLink) {
+            await WorkRepository.linkConcept(work.id, match.id, match.similarity);
+            console.log(`🔗 Linked [${match.category}] "${match.name}" (Sim: ${match.similarity.toFixed(3)})`);
         }
     }
 
