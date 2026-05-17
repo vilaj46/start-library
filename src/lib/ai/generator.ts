@@ -31,6 +31,57 @@ Task Instructions:
     }
 }
 
+export interface WorkTags {
+    narrative: string[];
+    world: string[];
+    character: string[];
+    system: string[];
+    genre: string[];
+}
+
+export async function tagWork(title: string, summary: string): Promise<WorkTags> {
+    const empty: WorkTags = { narrative: [], world: [], character: [], system: [], genre: [] };
+    const prompt = `You are tagging a book for a narrative concept ontology. Output ONLY valid JSON, no explanation.
+
+BOOK: "${title}"
+SUMMARY: ${summary}
+
+Return a JSON object with exactly these keys. Each value is an array of 3-6 short keyword phrases (no full sentences, no character names):
+{
+  "narrative": [],
+  "world": [],
+  "character": [],
+  "system": [],
+  "genre": []
+}
+
+narrative = story mechanics: tropes, tone, conflict type, pacing, motifs (e.g. "chosen one", "coming of age", "dark vs light")
+world = setting and worldbuilding: biomes, power structures, aesthetics, scale (e.g. "hidden magical world", "boarding school", "feudal hierarchy")
+character = archetypes, motivations, relationships, group dynamics (e.g. "orphan hero", "found family", "mentor figure", "loyal sidekick")
+system = magic/tech/power rules: how they work, limitations, sources (e.g. "innate magical talent", "spell-based combat", "wand as conduit")
+genre = genre and subgenre labels (e.g. "epic fantasy", "coming-of-age", "dark fantasy")`;
+
+    try {
+        const response = await ollama.chat({
+            model: 'llama3.1',
+            messages: [{ role: 'user', content: prompt }],
+            format: 'json',
+            options: { temperature: 0.1, num_ctx: 2048 }
+        });
+        const parsed = JSON.parse(response.message.content);
+        return {
+            narrative: Array.isArray(parsed.narrative) ? parsed.narrative : [],
+            world:     Array.isArray(parsed.world)     ? parsed.world     : [],
+            character: Array.isArray(parsed.character) ? parsed.character : [],
+            system:    Array.isArray(parsed.system)    ? parsed.system    : [],
+            genre:     Array.isArray(parsed.genre)     ? parsed.genre     : [],
+        };
+    } catch (e) {
+        console.error('❌ Work tagging failed:', e);
+        return empty;
+    }
+}
+
 export async function summarizeWork(title: string, description: string): Promise<string> {
     const prompt = `
 Summarize the following book into exactly ONE sentence that captures its core narrative, thematic, and structural elements.

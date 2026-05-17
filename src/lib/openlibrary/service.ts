@@ -6,7 +6,7 @@ import { AuthorRepository } from "#/db/authors/repository";
 import { WorkRepository } from "#/db/works/repository";
 import type { OpenLibraryId } from "#/lib/openlibrary/schema";
 import { detectSeries, extractText, isQualityWork, matchesTitleBlacklist, normalizeTitle } from "#/lib/openlibrary/utils";
-import { enrichAuthorBiography, summarizeWork } from "#/lib/ai/generator";
+import { enrichAuthorBiography, summarizeWork, tagWork } from "#/lib/ai/generator";
 import { VectorMath } from "#/lib/math";
 
 const googleBooksClient = new GoogleBooksClient();
@@ -96,9 +96,20 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
         console.log(`🧠 Summarizing "${olWork.title}"...`);
         const thematicSummary = await summarizeWork(olWork.title, description || "No description provided.");
 
+        console.log(`🏷️  Tagging "${olWork.title}"...`);
+        const tags = await tagWork(olWork.title, thematicSummary);
+
         const limitedSubjects = (olWork.subjects || []).slice(0, 40).join(', ');
         const categoriesText = googleCategories.length > 0 ? ` Genres: ${googleCategories.join(', ')}.` : '';
-        const workText = `Summary: ${thematicSummary}. Subjects: ${limitedSubjects}.${categoriesText}`;
+        const workText = [
+            tags.narrative.length ? `Narrative: ${tags.narrative.join(', ')}.` : '',
+            tags.world.length     ? `World: ${tags.world.join(', ')}.` : '',
+            tags.character.length ? `Characters: ${tags.character.join(', ')}.` : '',
+            tags.system.length    ? `Systems: ${tags.system.join(', ')}.` : '',
+            tags.genre.length     ? `Genre: ${tags.genre.join(', ')}.` : '',
+            `Subjects: ${limitedSubjects}.`,
+            categoriesText,
+        ].filter(Boolean).join(' ');
         const [workEmbedding] = await embeddingClient.fetchBatch([workText]);
 
         if (!workEmbedding || workEmbedding.length === 0) continue;

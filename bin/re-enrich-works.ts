@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { prisma } from "../src/db";
 import { embeddingClient } from "../src/lib/ai/embedding";
-import { summarizeWork } from "../src/lib/ai/generator";
+import { summarizeWork, tagWork } from "../src/lib/ai/generator";
 import { VectorMath } from "../src/lib/math";
 import { AuthorRepository } from "../src/db/authors/repository";
 
@@ -21,7 +21,16 @@ async function reenrichWork(work: { id: number; title: string; description: stri
     }
 
     const thematicSummary = await summarizeWork(work.title, description);
-    const workText = `Summary: ${thematicSummary}. Description: ${description.slice(0, 500)}`;
+    const tags = await tagWork(work.title, thematicSummary);
+
+    const workText = [
+        tags.narrative.length ? `Narrative: ${tags.narrative.join(', ')}.` : '',
+        tags.world.length     ? `World: ${tags.world.join(', ')}.` : '',
+        tags.character.length ? `Characters: ${tags.character.join(', ')}.` : '',
+        tags.system.length    ? `Systems: ${tags.system.join(', ')}.` : '',
+        tags.genre.length     ? `Genre: ${tags.genre.join(', ')}.` : '',
+        `Description: ${description.slice(0, 500)}`,
+    ].filter(Boolean).join(' ');
 
     const [embedding] = await embeddingClient.fetchBatch([workText]);
     if (!embedding || embedding.length === 0) {
