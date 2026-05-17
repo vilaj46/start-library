@@ -112,7 +112,7 @@ function SeriesDetailPage() {
                 <div className="flex-1">
                   <div className="flex items-baseline gap-3 mb-2">
                     <h3 className="text-2xl font-bold text-[var(--sea-ink)] group-hover:text-[var(--lagoon-deep)] transition-colors">
-                      {ws.work.title}
+                      <Link to={`/works/${ws.work.id}`}>{ws.work.title}</Link>
                     </h3>
                     {ws.order !== null && (
                       <span className="shrink-0 rounded-lg bg-[var(--sea-ink)] px-2 py-1 text-xs font-bold text-white shadow-sm">

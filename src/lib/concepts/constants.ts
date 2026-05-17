@@ -1,119 +1,128 @@
-export const CONFLICT_THRESHOLD = 0.45;
-export const EDGE_THRESHOLD = 0.65;
-export const FALLBACK_THRESHOLD = 0.60;
+import { AI_CONFIG } from "#/lib/ai/config";
 
-export const CANDIDATE_CATEGORY_LABELS = {
-    NARRATIVE: "narrative",
-    WORLD: "world",
-    INTENSITY: "intensity",
-    CONTENT: "content",
-    SYSTEM: "system",
-    CHARACTER: "character",
-    GENRE: "genre"
+export const CONCEPT_TAXONOMY = {
+  narrative: [
+    "perspective", "prose", "pacing", "target_audience", "trope",
+    "tone", "conflict_type", "conflict_theme", "philosophy", "motif", "mood"
+  ],
+  world: [
+    "culture_base", "biome", "social_structure", "world", "scale",
+    "aesthetic", "world_scope", "power_structure", "landmark",
+    "geopolitical", "chronology", "temporal_logic", "event_chronology",
+    "temporal_system", "systems"
+  ],
+  intensity: [
+    "intensity"
+  ],
+  content: [
+    "addiction", "child_safety", "horror", "sexual", "sci_fi"
+  ],
+  system: [
+    "access", "manifestation", "limitation", "vibe", "enchantment",
+    "side_effect", "resonance", "sociology", "materiality", "source",
+    "discipline", "logic", "metaphysics", "integration_mechanics"
+  ],
+  character: [
+    "relation", "group_logic", "physique", "affiliation", "morality",
+    "status", "capability", "motivation", "background", "faction",
+    "cognition", "social_rank", "archetype", "origin", "alignment", "cognitive_state"
+  ],
+  genre: [
+    "fantasy", "sci_fi", "horror", "sci_fantasy"
+  ]
 } as const;
 
-export const NARRATIVE_SUB_CATEGORY_LABELS = {
-    PERSPECTIVE: "perspective",
-    PROSE: "prose",
-    PACING: "pacing",
-    TARGET_AUDIENCE: "target_audience",
-    TROPE: "trope",
-    TONE: "tone",
-    CONFLICT_TYPE: "conflict_type",
-    CONFLICT_THEME: "conflict_theme",
-    PHILOSOPHY: "philosophy",
-    MOTIF: "motif",
-    MOOD: "mood"
-} as const;
 
-export const WORLD_SUB_CATEGORY_LABELS = {
-    CULTURE_BASE: "culture_base",
-    BIOME: "biome",
-    SOCIAL_STRUCTURE: "social_structure",
-    WORLD: "world",
-    SCALE: "scale",
-    AESTHETIC: "aesthetic",
-    WORLD_SCOPE: "world_scope",
-    POWER_STRUCTURE: "power_structure",
-    LANDMARK: "landmark",
-    GEOPOLITICAL: "geopolitical",
-    CHRONOLOGY: "chronology",
-    TEMPORAL_LOGIC: "temporal_logic",
-    EVENT_CHRONOLOGY: "event_chronology",
-    TEMPORAL_SYSTEM: "temporal_system",
-    SYSTEMS: "systems",
-} as const;
+export const CANDIDATE_CATEGORY_LABELS = Object.fromEntries(
+  Object.keys(CONCEPT_TAXONOMY).map(k => [k.toUpperCase(), k])
+) as { [K in Uppercase<keyof typeof CONCEPT_TAXONOMY>]: Lowercase<K> };
 
-export const INTENSITY_SUB_CATEGORY_LABELS = {
-    INTENSITY: "intensity",
-} as const;
+export const SUB_CATEGORY_MAP = Object.fromEntries(
+  Object.entries(CONCEPT_TAXONOMY).map(([cat, subs]) => [
+    cat,
+    Object.fromEntries(subs.map(s => [s.toUpperCase(), s]))
+  ])
+) as {
+    [K in keyof typeof CONCEPT_TAXONOMY]: {
+      [S in (typeof CONCEPT_TAXONOMY)[K][number]as Uppercase<S>]: S
+    }
+  };
 
-export const CONTENT_SUB_CATEGORY_LABELS = {
-    ADDICTION: "addiction",
-    CHILD_SAFETY: "child_safety",
-    HORROR: "horror",
-    SEXUAL: "sexual",
-    SCI_FI: "sci_fi",
-} as const;
-
-export const SYSTEMS_SUB_CATEGORY_LABELS = {
-    ACCESS: "access",
-    MANIFESTATION: "manifestation",
-    LIMITATION: "limitation",
-    VIBE: "vibe",
-    ENCHANTMENT: "enchantment",
-    SIDE_EFFECT: "side_effect",
-    RESONANCE: "resonance",
-    SOCIOLOGY: "sociology",
-    MATERIALITY: "materiality",
-    SOURCE: "source",
-    DISCIPLINE: "discipline",
-    LOGIC: "logic",
-    METAPHYSICS: "metaphysics",
-    INTEGRATION_MECHANICS: "integration_mechanics",
-} as const;
-
-export const CHARACTER_SUB_CATEGORY_LABELS = {
-    RELATION: "relation",
-    GROUP_LOGIC: "group_logic",
-    PHYSIQUE: "physique",
-    AFFILIATION: "affiliation",
-    MORALITY: "morality",
-    STATUS: "status",
-    CAPABILITY: "capability",
-    MOTIVATION: "motivation",
-    BACKGROUND: "background",
-    FACTION: "faction",
-    COGNITION: "cognition",
-    SOCIAL_RANK: "social_rank",
-    ARCHETYPE: "archetype",
-    ORIGIN: "origin",
-    ALIGNMENT: "alignment",
-    COGNITIVE_STATE: "cognitive_state",
-} as const;
-
-export const GENRE_SUB_CATEGORY_LABELS = {
-    FANTASY: "fantasy",
-    SCI_FI: "sci_fi",
-    HORROR: "horror",
-    SCI_FANTASY: "sci_fantasy",
-} as const;
-
-export const SUB_CATEGORY_MAP = {
-    [CANDIDATE_CATEGORY_LABELS.NARRATIVE]: NARRATIVE_SUB_CATEGORY_LABELS,
-    [CANDIDATE_CATEGORY_LABELS.WORLD]: WORLD_SUB_CATEGORY_LABELS,
-    [CANDIDATE_CATEGORY_LABELS.INTENSITY]: INTENSITY_SUB_CATEGORY_LABELS,
-    [CANDIDATE_CATEGORY_LABELS.CONTENT]: CONTENT_SUB_CATEGORY_LABELS,
-    [CANDIDATE_CATEGORY_LABELS.SYSTEM]: SYSTEMS_SUB_CATEGORY_LABELS,
-    [CANDIDATE_CATEGORY_LABELS.CHARACTER]: CHARACTER_SUB_CATEGORY_LABELS,
-    [CANDIDATE_CATEGORY_LABELS.GENRE]: GENRE_SUB_CATEGORY_LABELS,
-} as const;
+export const NARRATIVE_SUB_CATEGORY_LABELS = SUB_CATEGORY_MAP.narrative;
+export const WORLD_SUB_CATEGORY_LABELS = SUB_CATEGORY_MAP.world;
+export const INTENSITY_SUB_CATEGORY_LABELS = SUB_CATEGORY_MAP.intensity;
+export const CONTENT_SUB_CATEGORY_LABELS = SUB_CATEGORY_MAP.content;
+export const SYSTEMS_SUB_CATEGORY_LABELS = SUB_CATEGORY_MAP.system;
+export const CHARACTER_SUB_CATEGORY_LABELS = SUB_CATEGORY_MAP.character;
+export const GENRE_SUB_CATEGORY_LABELS = SUB_CATEGORY_MAP.genre;
 
 export const SEVERITY_LABELS = {
-    LOW: "low",
-    MODERATE: "moderate",
-    HIGH: "high",
-    EXTREME: "extreme",
+  LOW: "low",
+  MODERATE: "moderate",
+  HIGH: "high",
+  EXTREME: "extreme",
 } as const;
 
 export const CANDIDATE_DEFAULT_WEIGHT = 1;
+
+export const CONCEPT_SCHEMA = {
+  type: "object",
+  properties: {
+    category: {
+      type: "string",
+      enum: Object.keys(CONCEPT_TAXONOMY)
+    },
+    subCategory: {
+      type: "string",
+      maxLength: AI_CONFIG.DB_LIMITS.SUB_CATEGORY_MAX_LENGTH
+    },
+    slug: {
+      type: "string",
+      description: "A snake_case, short identifier",
+      maxLength: AI_CONFIG.DB_LIMITS.SLUG_MAX_LENGTH
+    },
+    name: {
+      type: "string",
+      description: "A human-readable presentation name",
+      maxLength: AI_CONFIG.DB_LIMITS.NAME_MAX_LENGTH
+    },
+    description: {
+      type: "string",
+      description: "A 1-2 sentence detailed description of the concept"
+    },
+    logic: {
+      type: "string",
+      description: "How does this concept function structurally? Rules and limitations."
+    },
+    appeal: {
+      type: "string",
+      description: "Why does an audience enjoy this? Psychological or narrative appeal."
+    },
+    examples: {
+      type: "array",
+      items: { type: "string" },
+      description: "2-3 well-known media examples (books, movies, games) featuring this concept"
+    },
+    notes: {
+      type: "string",
+      description: "Optional internal notes or caveats"
+    },
+    levels: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          rank: { type: "number" },
+          label: { type: "string" }
+        },
+        required: ["rank", "label"]
+      },
+      description: "5 tiers of intensity or progression for this concept"
+    },
+    weight: {
+      type: "number",
+      description: "Always set to 1.0"
+    }
+  },
+  required: ["category", "subCategory", "slug", "name", "description", "logic", "appeal", "examples", "levels", "weight"]
+} as const;

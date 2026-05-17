@@ -1,194 +1,28 @@
-Welcome to your new TanStack Start app! 
+Semantic Library Database
 
-# Getting Started
+An intelligent, vector-backed taxonomy engine for evaluating and categorizing literature.
+👁️ Overview
 
-To run this application:
+Ingests works from OpenLibrary, uses local LLMs (Ollama) for thematic enrichment, and maps titles to a dense literary taxonomy across 8 primary dimensions (world, meta, character, intensity, system, genre, narrative, content) using pgvector.
+✨ Core Features
+Ingestion & Taxonomy Pipeline
 
-```bash
-npm install
-npm run dev
-```
+    Multi-Dimensional Mapping: Evaluates works against the 8 core dimensions using cosine similarity with a strict 0.635 auto-link threshold.
 
-# Building For Production
+    Gap & Near-Miss Detection: Identifies ontological gaps (missingCategories) when a book misses the threshold, and surfaces "near misses" (0.58–0.634) for manual UI curation.
 
-To build this application for production:
+    Genre-Targeted Pre-Filtering: LLM pre-flight check that immediately rejects works outside of Sci-Fi, Fantasy, and Horror to save resources.
 
-```bash
-npm run build
-```
+    Series Stabilization: Computes cumulative vector probabilities across a series to resolve conflicting tags (e.g., High vs. Low Fantasy) and enforce consistency.
 
-## Testing
+    Concept Enrichment: Automatically expands weak concept descriptions into dense, high-quality vector embeddings.
 
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
+🚀 Roadmap
 
-```bash
-npm run test
-```
+    Concept Drift Analytics: Track and plot the vector trajectory of flexible dimensions (intensity, character, content) to visualize how a series or author changes over time.
 
-## Styling
+    Vector "Read-Alike" Engine: A pure mathematical recommendation feature using raw vector distance (<=>) to find books with a matching "vibe" without relying on shared tags.
 
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
+    Concept Inheritance Graph: Introduce parent/child relationships to taxonomy concepts, allowing books to implicitly inherit parent tags (e.g., Hard Magic → Magic System).
 
-### Removing Tailwind CSS
-
-If you prefer not to use Tailwind CSS:
-
-1. Remove the demo pages in `src/routes/demo/`
-2. Replace the Tailwind import in `src/styles.css` with your own styles
-3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Uninstall the packages: `npm install @tailwindcss/vite tailwindcss -D`
-
-
-
-## Routing
-
-This project uses [TanStack Router](https://tanstack.com/router) with file-based routing. Routes are managed as files in `src/routes`.
-
-### Adding A Route
-
-To add a new route to your application just add a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from "@tanstack/react-router";
-```
-
-Then anywhere in your JSX you can use it like so:
-
-```tsx
-<Link to="/about">About</Link>
-```
-
-This will create a link that will navigate to the `/about` route.
-
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
-
-### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'My App' },
-    ],
-  }),
-  shellComponent: ({ children }) => (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <header>
-          <nav>
-            <Link to="/">Home</Link>
-            <Link to="/about">About</Link>
-          </nav>
-        </header>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  ),
-})
-```
-
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
-
-## Server Functions
-
-TanStack Start provides server functions that allow you to write server-side code that seamlessly integrates with your client components.
-
-```tsx
-import { createServerFn } from '@tanstack/react-start'
-
-const getServerTime = createServerFn({
-  method: 'GET',
-}).handler(async () => {
-  return new Date().toISOString()
-})
-
-// Use in a component
-function MyComponent() {
-  const [time, setTime] = useState('')
-  
-  useEffect(() => {
-    getServerTime().then(setTime)
-  }, [])
-  
-  return <div>Server time: {time}</div>
-}
-```
-
-## API Routes
-
-You can create API routes by using the `server` property in your route definitions:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { json } from '@tanstack/react-start'
-
-export const Route = createFileRoute('/api/hello')({
-  server: {
-    handlers: {
-      GET: () => json({ message: 'Hello, World!' }),
-    },
-  },
-})
-```
-
-## Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/people')({
-  loader: async () => {
-    const response = await fetch('https://swapi.dev/api/people')
-    return response.json()
-  },
-  component: PeopleComponent,
-})
-
-function PeopleComponent() {
-  const data = Route.useLoaderData()
-  return (
-    <ul>
-      {data.results.map((person) => (
-        <li key={person.name}>{person.name}</li>
-      ))}
-    </ul>
-  )
-}
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-# Demo files
-
-Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
-
-# Learn More
-
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
-
-For TanStack Start specific documentation, visit [TanStack Start](https://tanstack.com/start).
-# start-library
+    Automated Ontological Loop: Automate taxonomy growth by parsing missingCategories and tasking Ollama to generate, embed, and inject missing concepts on the fly.

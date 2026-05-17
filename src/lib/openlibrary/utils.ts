@@ -1,181 +1,141 @@
-import { z } from "zod";
-import type { OpenLibraryId, OpenLibraryWork } from "./types";
+import type { OpenLibraryId, OpenLibraryWork, OpenLibraryAuthor, SeriesInfo } from "#/lib/openlibrary/schema";
+import {
+    openLibraryWorkSchema,
+    openLibraryAuthorSchema,
+    openLibraryIdSchema,
+} from "#/lib/openlibrary/schema";
+import {
+    BLACKLIST_KEYWORDS,
+    NON_NARRATIVE_TAGS,
+    NON_NARRATIVE_TITLE_PATTERNS,
+    CONTAINER_PATTERNS,
+    NARRATIVE_KEYWORDS,
+} from "#/lib/openlibrary/constants";
+import { QUALITY_CONFIG } from "#/lib/openlibrary/config";
+import { isEnglish, hasNonLatinScripts } from "#/lib/utils/language";
 
-/**
- * Validates a string as an OpenLibraryId (starts with 'OL')
- */
-export const openLibraryIdSchema = z.string().startsWith("OL");
+export const isOpenLibraryId = (id: unknown): id is OpenLibraryId =>
+    openLibraryIdSchema.safeParse(id).success;
 
-export function isOpenLibraryId(id: unknown): id is OpenLibraryId {
-    return openLibraryIdSchema.safeParse(id).success;
-}
+export const extractId = (keyOrPath: string): OpenLibraryId | null => {
+    const match = keyOrPath.match(/OL\d+[A-Z]?/i);
+    const id = match ? match[0].toUpperCase() : null;
+    return isOpenLibraryId(id) ? id : null;
+};
 
-/**
- * Validates a value is compatible with JSON storage
- */
-export const jsonValueSchema: z.ZodType<any> = z.lazy(() =>
-    z.union([
-        z.string(),
-        z.number(),
-        z.boolean(),
-        z.null(),
-        z.array(jsonValueSchema),
-        z.record(z.string(), jsonValueSchema),
-    ])
-);
+export const extractText = (field?: string | { value: string }): string => {
+    if (!field) return "";
+    return typeof field === 'string' ? field : field.value;
+};
 
-/**
- * Validates the raw API response from OpenLibrary for a Work
- */
-export const openLibraryWorkSchema = z.object({
-    key: z.string(),
-    title: z.string(),
-    description: z.union([
-        z.string(),
-        z.object({
-            type: z.string(),
-            value: z.string()
-        })
-    ]).optional(),
-    subjects: z.array(z.string()).optional(),
-}).catchall(jsonValueSchema);
+export const parseOpenLibraryAuthor = (data: unknown): OpenLibraryAuthor =>
+    openLibraryAuthorSchema.parse(data);
 
-import { franc } from 'franc';
+export const isOpenLibraryAuthor = (data: unknown): data is OpenLibraryAuthor =>
+    openLibraryAuthorSchema.safeParse(data).success;
 
-export function isOpenLibraryWork(obj: unknown): obj is OpenLibraryWork {
-    return openLibraryWorkSchema.safeParse(obj).success;
-}
+export const isOpenLibraryWork = (obj: unknown): obj is OpenLibraryWork =>
+    openLibraryWorkSchema.safeParse(obj).success;
 
-export const BLACKLIST_KEYWORDS = [
-    'sparknotes', 'cliffnotes', "cliff's notes", 'summary of', 'study guide', 
-    'workbook', 'analysis of', 'audiobook', 'audio cd', 'cassette', 
-    'large print', 'library binding', 'box set', 'complete set', 'collection', 
-    'omnibus', 'bundle', 'anthology', 'series', 'selected works', 'works of', 
-    'the works of', 'journal', 'diary', 'notebook', 'pop-up', 'gallery of', 
-    'coloring book', 'activity book', 'sticker book', 'schoolbooks'
-];
-
-/**
- * Strips common metadata noise from titles for better deduplication.
- */
-export function normalizeTitle(title: string): string {
-    return title
-        .replace(/\s*\(.*?\)\s*/g, ' ') // Remove content in parentheses e.g. (English Edition)
-        .replace(/\s*\[.*?\]\s*/g, ' ') // Remove content in brackets e.g. [Hardcover]
-        .replace(/\s+\d+\/\d+\s*/g, ' ') // Remove split volumes like 1/2, 2/5
-        .replace(/\s+vol(\.?)\s*\d+/i, ' ') // Remove Vol 1, Vol. 2
-        .trim()                         // Trim before stripping trailing punctuation
-        .replace(/[:.,!?;]$/, '')       // Remove trailing punctuation
-        .replace(/\s+/g, ' ')           // Collapse whitespace
+export const normalizeTitle = (title: string): string =>
+    title
+        .replace(/\s*\(hardcover\)|\s*\(paperback\)|\s*\(edition\)/i, ' ')
+        .replace(/\s+vol(\.?)\s*\d+/i, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/[:.,!?;]+$/, '')
         .trim();
-}
 
-export function isGoodForOntology(work: OpenLibraryWork): { valid: boolean; reason?: string } {
+export const isGoodForOntology = (work: OpenLibraryWork): { valid: boolean; reason?: string } => {
     const title = work.title?.toLowerCase() || "";
     const subtitle = work.subtitle?.toLowerCase() || "";
-    
-    // 1. Check for "Container" keywords
-    const junkPatterns = [
-        /box set/i, /complete set/i, /collection/i, /omnibus/i, 
-        /bundle/i, /library/i, /anthology/i, /series/i
-    ];
 
-    if (junkPatterns.some(p => p.test(title) || p.test(subtitle))) {
+    if (CONTAINER_PATTERNS.some(p => p.test(title) || p.test(subtitle))) {
         return { valid: false, reason: "Container/Box-Set detected" };
     }
 
-    // 2. Author Count check (Compilations are often noisy, but 3 is common for collaborations)
+    if (BLACKLIST_KEYWORDS.some(word => title.includes(word) || subtitle.includes(word))) {
+        return { valid: false, reason: "Blacklisted keyword detected in title" };
+    }
+
     if ((work.authors?.length || 0) > 3) {
         return { valid: false, reason: "Multi-author compilation (> 3)" };
     }
 
-    // 3. Subject Breadth
-    const subjects = work.subjects || [];
+    const subjects = (work.subjects || [])
+        .map((s: any) => (typeof s === 'string' ? s.toLowerCase() : ''));
+
     if (subjects.length > 0) {
-        const specificSubjects = subjects.filter((s: string) => 
-            !s.toLowerCase().includes("fiction") && 
-            !s.toLowerCase().includes("stories")
+        const hasNarrativeKeyword = subjects.some(s =>
+            NARRATIVE_KEYWORDS.some(keyword => s.includes(keyword))
         );
-        // If all subjects are just "Fiction" or "Stories", it's too vague
-        if (specificSubjects.length === 0) {
+        if (!hasNarrativeKeyword) {
             return { valid: false, reason: "Generic subjects only" };
         }
     }
 
     return { valid: true };
-}
+};
 
-export function isNarrativeWork(work: OpenLibraryWork): { isNarrative: boolean; reason?: string } {
-    const subjects = (work.subjects || []).map((s: string) => s.toLowerCase());
+export const isNarrativeWork = (work: OpenLibraryWork): { isNarrative: boolean; reason?: string } => {
+    const subjects = (work.subjects || [])
+        .map((s: any) => (typeof s === 'string' ? s.toLowerCase() : ''));
     const title = (work.title || "").toLowerCase();
 
-    // 1. Definite Non-Fiction/Ancillary Keywords
-    const blacklistedTags = [
-        'exhibition', 'catalog', 'miscellanea', 'history and criticism',
-        'juvenile nonfiction', 'study guide', 'sparknotes', 'bibliography',
-        'companion', 'handbook', 'almanac', 'biography'
-    ];
-
-    if (subjects.some(s => blacklistedTags.some(tag => s.includes(tag)))) {
+    if (subjects.some(s => NON_NARRATIVE_TAGS.some(tag => s.includes(tag)))) {
         return { isNarrative: false, reason: "Ancillary/Non-fiction tags detected" };
     }
 
-    // 2. Non-Narrative Title Patterns
-    const nonNarrativeTitlePatterns = [
-        /history of magic/i,
-        /the world of/i,
-        /companion to/i,
-        /guide to/i,
-        /official handbook/i
-    ];
-
-    if (nonNarrativeTitlePatterns.some(pattern => pattern.test(title))) {
+    if (NON_NARRATIVE_TITLE_PATTERNS.some(pattern => pattern.test(title))) {
         return { isNarrative: false, reason: "Companion title pattern detected" };
     }
 
-    // 3. Subject Density Check
-    const isFiction = subjects.some(s => s.includes('fiction') || s.includes('novel') || s.includes('stories'));
-    if (!isFiction && subjects.length > 5) {
-        return { isNarrative: false, reason: "High metadata density without 'fiction' tag" };
+    const isExplicitNarrative = subjects.some(s =>
+        NARRATIVE_KEYWORDS.some(keyword => s.includes(keyword))
+    );
+
+    if (!isExplicitNarrative && subjects.length > QUALITY_CONFIG.MAX_SUBJECTS_WITHOUT_NARRATIVE_TAG) {
+        return { isNarrative: false, reason: "High metadata density without explicit narrative tags" };
     }
 
     return { isNarrative: true };
-}
+};
 
-export function isEnglish(text: string): boolean {
-    if (!text || text.length < 20) return true; // Too short to judge, assume OK or skip
-    const langCode = franc(text); 
-    return langCode === 'eng';
-}
-
-export function getTrustScore(work: OpenLibraryWork): number {
+export const getTrustScore = (work: OpenLibraryWork): number => {
     let score = 0;
+    const weights = QUALITY_CONFIG.TRUST_WEIGHTS;
 
-    // 1. Check for Identifiers (High Trust)
-    if (work.lccn && work.lccn.length > 0) score += 50;
-    if (work.oclc_numbers && work.oclc_numbers.length > 0) score += 30;
-    if (work.isbn_13 || work.isbn_10) score += 20;
+    if (work.lccn && work.lccn.length > 0) score += weights.IDENTIFIERS.LCCN;
+    if (work.oclc_numbers && work.oclc_numbers.length > 0) score += weights.IDENTIFIERS.OCLC;
 
-    // 2. Check for 'Good' Subjects vs 'Bad' Subjects
-    const subjects = (work.subjects || []).map((s: string) => s.toLowerCase());
-    if (subjects.includes('fiction')) score += 10;
-    if (subjects.includes('exhibitions')) score -= 50; // Immediate penalty
+    const hasIsbn13 = Array.isArray(work.isbn_13) && work.isbn_13.length > 0;
+    const hasIsbn10 = Array.isArray(work.isbn_10) && work.isbn_10.length > 0;
+    if (hasIsbn13 || hasIsbn10) score += weights.IDENTIFIERS.ISBN;
 
-    return score;
-}
+    const subjects = (work.subjects || [])
+        .map((s: any) => (typeof s === 'string' ? s.toLowerCase() : ''));
 
-/**
- * High-precision check to determine if a work should be ingested.
- */
-export function isQualityWork(work: OpenLibraryWork): { valid: boolean; reason?: string } {
-    const title = work.title || "";
-    if (title.length < 3 || title.length > 200) {
-        return { valid: false, reason: "Invalid title length" };
+    for (const rule of weights.SUBJECT_MAP) {
+        if (subjects.some(s => s.includes(rule.keyword))) {
+            score += rule.weight;
+        }
     }
 
-    // Latin script check (Initial coarse filter)
-    const nonLatinRegex = /[^\x00-\x7F\u00C0-\u017F\u2000-\u206F\u2070-\u209F\u2200-\u22FF]/;
-    if (nonLatinRegex.test(title)) return { valid: false, reason: "Non-Latin script title" };
+    return score;
+};
+
+export const isQualityWork = (work: OpenLibraryWork): { valid: boolean; reason?: string } => {
+    const description = extractText(work.description);
+    const title = work.title || "";
+
+    if (title.length < QUALITY_CONFIG.TITLE_MIN_LENGTH || title.length > QUALITY_CONFIG.TITLE_MAX_LENGTH) {
+        return { valid: false, reason: `Invalid title length (must be ${QUALITY_CONFIG.TITLE_MIN_LENGTH}-${QUALITY_CONFIG.TITLE_MAX_LENGTH})` };
+    }
+
+    if (hasNonLatinScripts(title)) return { valid: false, reason: "Non-Latin script title" };
+
+    if (/part \d+ of \d+/i.test(title)) {
+        return { valid: false, reason: "Split-volume work detected in title" };
+    }
 
     const ontologyResult = isGoodForOntology(work);
     if (!ontologyResult.valid) return ontologyResult;
@@ -185,63 +145,38 @@ export function isQualityWork(work: OpenLibraryWork): { valid: boolean; reason?:
         return { valid: false, reason: narrativeResult.reason };
     }
 
-    const description = typeof work.description === 'string' 
-        ? work.description 
-        : work.description?.value || "";
+    if (description.length > 0) {
+        if (!isEnglish(description)) {
+            return { valid: false, reason: "Non-English description detected" };
+        }
 
-    // 6. Split-volume detection in description
-    if (/part \d+ of \d+/i.test(description)) {
-        return { valid: false, reason: "Split-volume description detected" };
+        if (description.length < QUALITY_CONFIG.DESCRIPTION_MIN_LENGTH) {
+            return { valid: false, reason: `Description too short (< ${QUALITY_CONFIG.DESCRIPTION_MIN_LENGTH} chars)` };
+        }
+    } else {
+        return { valid: false, reason: "Missing description" };
     }
 
-    if (description.length < 80) {
-        return { valid: false, reason: "Description too short (< 80 chars)" };
-    }
-
-    if (!isEnglish(description)) {
-        return { valid: false, reason: "Non-English description detected" };
-    }
-
-    if (getTrustScore(work) < -20) {
-        return { valid: false, reason: "Trust score too low" };
+    if (getTrustScore(work) < QUALITY_CONFIG.MIN_TRUST_SCORE) {
+        return { valid: false, reason: `Trust score too low (< ${QUALITY_CONFIG.MIN_TRUST_SCORE})` };
     }
 
     return { valid: true };
-}
+};
 
-/**
- * Attempts to extract series name and order from work metadata.
- */
-export function detectSeries(work: OpenLibraryWork): { name: string | null; order: number | null } {
-    // 1. Check explicit series field from OpenLibrary
+export const detectSeries = (work: OpenLibraryWork): SeriesInfo => {
     if (work.series && work.series.length > 0) {
         const seriesStr = work.series[0];
         if (typeof seriesStr === 'string') {
             const match = seriesStr.match(/^(.*?)(?:,?\s*#?(\d+))?$/);
             if (match) {
-                return { 
-                    name: match[1].trim(), 
-                    order: match[2] ? parseInt(match[2]) : null 
+                return {
+                    name: match[1].trim(),
+                    order: match[2] ? parseInt(match[2]) : null
                 };
             }
         }
     }
 
-    // 2. Heuristic for Harry Potter
-    const title = work.title || "";
-    if (/harry potter/i.test(title)) {
-        const volMatch = title.match(/#(\d+)/) || title.match(/book\s+(\d+)/i);
-        return { 
-            name: "Harry Potter", 
-            order: volMatch ? parseInt(volMatch[1]) : null 
-        };
-    }
-
-    // 3. Heuristic for Cormoran Strike
-    const subjects = (work.subjects || []).map(s => s.toLowerCase());
-    if (subjects.some(s => s.includes("cormoran strike")) || /cormoran strike/i.test(title)) {
-        return { name: "Cormoran Strike", order: null };
-    }
-
     return { name: null, order: null };
-}
+};

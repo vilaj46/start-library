@@ -16,38 +16,9 @@ import {
     CHARACTER_SUB_CATEGORY_LABELS,
     GENRE_SUB_CATEGORY_LABELS,
     SEVERITY_LABELS
-} from "./constants";
-
-export type ProgressionLevel = {
-    rank: number;
-    label: string;
-};
+} from "#/lib/concepts/constants";
 
 export type Severity = typeof SEVERITY_LABELS[keyof typeof SEVERITY_LABELS] | null;
-
-export type PostConceptBody = Omit<Concept, "id" | "slug" | "embedding" | "updatedAt" | "levels" | "rawInput" | "metadata"> & {
-    levelOne: ProgressionLevel | null;
-    levelTwo: ProgressionLevel | null;
-    levelThree: ProgressionLevel | null;
-    levelFour: ProgressionLevel | null;
-    levelFive: ProgressionLevel | null;
-    weight: number;
-};
-
-export type Candidate = {
-    category: Category;
-    subCategory: SubCategory;
-    slug: Concept["slug"];
-    name: Concept["name"];
-    description: Concept["description"];
-    logic: Concept["logic"];
-    appeal: Concept["appeal"];
-    examples: Concept["examples"];
-    aliases?: string[];
-    notes: Concept["notes"];
-    levels: Concept["levels"];
-    weight: number;
-};
 
 export type Category = typeof CANDIDATE_CATEGORY_LABELS[keyof typeof CANDIDATE_CATEGORY_LABELS];
 

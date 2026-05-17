@@ -102,15 +102,16 @@ model Work {
   id              Int      @id @default(autoincrement())
   title           String
   description     String?  @db.Text
-  rawApiResponse  Json?    @map("raw_api_response")
-  embedding       Unsupported("vector(1024)")?
-  
+  olRawResponse     Json?    @map("ol_raw_response")
+  googleRawResponse Json?    @map("google_raw_response")
+  embedding         Unsupported("vector(1024)")?
+
   authorId        Int      @map("author_id")
   author          Author   @relation(fields: [authorId], references: [id])
-  
+
   isVerified      Boolean  @default(false) @map("is_verified")
 
-  workConcepts    WorkConcept[] 
+  workConcepts    WorkConcept[]
   workSeries      WorkSeries[]
 
   @@map("works")

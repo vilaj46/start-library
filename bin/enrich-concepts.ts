@@ -1,85 +1,97 @@
+import 'dotenv/config';
 import { prisma } from '../src/db';
-import { ConceptRepository } from '../src/lib/concepts/repository';
-import { EmbeddingClient } from '../src/clients/EmbeddingClient';
+import { enrichConceptDescription } from '../src/lib/ai/utils';
+import { embeddingClient } from '../src/lib/ai/embedding';
+import { VectorMath } from '../src/lib/math';
 
-const embeddingClient = new EmbeddingClient();
+const DELAY_MS = 300;
 
-const enrichmentData = [
-    {
-        name: "Urban Fantasy",
-        description: "Magic, paranormal elements, or hidden supernatural societies existing within a modern, metropolitan, or contemporary real-world setting. Often involves the 'Masquerade' trope where magic is hidden in plain sight.",
-        logic: "The intersection of the mundane and the magical; hidden worlds within modern cities.",
-        appeal: "Wonder, mystery, and the sense that magic could be real and just around the corner.",
-        examples: ["Harry Potter", "The Dresden Files", "Neverwhere", "Percy Jackson"],
-        aliases: ["Modern Magic", "Hidden World", "Masquerade", "The Veil", "Contemporary Fantasy"]
-    },
-    {
-        name: "Coming of Age",
-        description: "The psychological and moral growth of a protagonist from youth to adulthood. Often involves a 'Bildungsroman' journey, loss of innocence, identity formation, and taking on adult responsibilities.",
-        logic: "Transition of agency; the shift from being protected by the world to being responsible for it. Moral awakening.",
-        appeal: "Relatability, nostalgia, and emotional growth.",
-        examples: ["Harry Potter", "To Kill a Mockingbird", "The Perks of Being a Wallflower", "Percy Jackson"],
-        aliases: ["Young Adult", "Adolescence", "Bildungsroman", "Juvenile fiction", "Growing Up"]
-    },
-    {
-        name: "Cryptocracy",
-        description: "A secret society, cabal, or clandestine organization that operates behind the scenes to influence power, protect deep secrets, or maintain a hidden status quo. A 'government from the shadows' involving hidden identities and exclusive, often ritualistic membership.",
-        logic: "Power is maintained through information asymmetry, secrecy, and exclusion; influencing global or local events while remaining invisible to the public.",
-        appeal: "Intrigue, mystery, and a sense of a hidden hand guiding the world.",
-        examples: ["Order of the Phoenix", "Illuminati", "The Da Vinci Code", "The Freemasons"],
-        aliases: ["Secret Society", "Cabal", "Clandestine", "Underground Organization", "Shadow Government"]
-    },
-    {
-        name: "Low Fantasy",
-        description: "Fantasy stories where magical elements are rare, subtle, or kept hidden from the general population within an otherwise normal or realistic world. Focuses on the impact of magic on the mundane.",
-        logic: "Grounded magic; the world looks like ours but has hidden magical pockets.",
-        appeal: "Grit, relatability, and subtle wonder.",
-        examples: ["Harry Potter", "American Gods", "The Ocean at the End of the Lane"],
-        aliases: ["Hidden Magic", "Grounded Fantasy", "Realistic Magic", "Magical Realism"]
-    },
-    {
-        name: "The Chosen One",
-        description: "A character destined by fate, prophecy, or unique heritage to save the world, defeat a great evil, or fulfill a critical destiny. Often a reluctant hero who discovers their true power.",
-        logic: "Destiny and predetermined importance; the weight of the world on one individual.",
-        appeal: "Grandeur, importance, and the triumph of the underdog.",
-        examples: ["Harry Potter", "Star Wars", "The Matrix", "Lord of the Rings"],
-        aliases: ["Prophecy", "Reluctant Hero", "Destined", "Savior", "Messianic Archetype"]
-    }
-];
+// Categories/sub-categories where embedding quality is critical and we re-enrich regardless of description length
+const PRIORITY_CATEGORIES = ['world', 'intensity'];
+const PRIORITY_SUBCATEGORIES = ['perspective', 'tone', 'target_audience'];
 
-async function main() {
-    for (const data of enrichmentData) {
-        console.log(`✨ Enriching concept: ${data.name}...`);
-        
-        const concept = await prisma.concept.findFirst({
-            where: { name: data.name }
-        });
+async function enrichOne(concept: any, label: string) {
+    console.log(`\n  🧠 [${label}] "${concept.name}"`);
+    console.log(`     Desc: "${concept.description?.slice(0, 80)}..."`);
 
-        if (!concept) {
-            console.warn(`⚠️ Concept not found: ${data.name}`);
-            continue;
-        }
+    const expandedDescription = await enrichConceptDescription(concept.name, concept.description ?? '');
 
-        // Include aliases in the embedding context for "semantic weight"
-        const deepContext = `${data.name}: ${data.logic} ${data.description} ${data.appeal} Aliases: ${data.aliases.join(', ')}. Examples: ${data.examples.join(', ')}`;
-        const [embedding] = await embeddingClient.fetchBatch([deepContext]);
+    const rawContext = [
+        concept.name,
+        expandedDescription,
+        concept.logic,
+        concept.appeal
+    ].filter(Boolean).join('. ');
 
-        if (embedding && embedding.length > 0) {
-            const vectorString = embeddingClient.toVectorString(embedding);
-            await ConceptRepository.updateMetadata(concept.id, {
-                description: data.description,
-                logic: data.logic,
-                appeal: data.appeal,
-                examples: data.examples,
-                aliases: data.aliases,
-                embedding: vectorString,
-                rawInput: deepContext
-            });
-            console.log(`✅ Updated ${data.name} (ID: ${concept.id})`);
-        } else {
-            console.error(`❌ Failed to generate embedding for ${data.name}`);
-        }
-    }
+    const [embedding] = await embeddingClient.fetchBatch([rawContext]);
+    const vectorString = VectorMath.toVectorString(embedding);
+
+    await prisma.$executeRaw`
+        UPDATE concepts
+        SET description  = ${expandedDescription},
+            raw_input    = ${rawContext},
+            embedding    = ${vectorString}::vector,
+            updated_at   = NOW()
+        WHERE id = ${concept.id};
+    `;
+
+    console.log(`     ✅ "${expandedDescription.slice(0, 100)}..."`);
+    await new Promise(r => setTimeout(r, DELAY_MS));
 }
 
-main().finally(() => prisma.$disconnect());
+async function enrichConcepts() {
+    // ── PASS 1: Priority re-enrichment — weak categories regardless of description length ──
+    console.log('\n═══════════════════════════════════════════');
+    console.log('PASS 1: Priority re-enrichment (weak categories)');
+    console.log('═══════════════════════════════════════════');
+
+    const priorityConcepts = await prisma.$queryRaw<any[]>`
+        SELECT * FROM concepts
+        WHERE category = ANY(${PRIORITY_CATEGORIES}::text[])
+           OR sub_category = ANY(${PRIORITY_SUBCATEGORIES}::text[])
+        ORDER BY category, sub_category, id ASC;
+    `;
+
+    console.log(`Found ${priorityConcepts.length} concepts to re-enrich in priority categories.\n`);
+    let p1 = 0;
+    for (const concept of priorityConcepts) {
+        p1++;
+        try {
+            await enrichOne(concept, `${p1}/${priorityConcepts.length} ${concept.category}/${concept.sub_category}`);
+        } catch (err) {
+            console.error(`  ❌ Failed: "${concept.name}"`, err);
+        }
+    }
+
+    // ── PASS 2: Sweep — any concept still with a thin description (< 150 chars) ──
+    console.log('\n═══════════════════════════════════════════');
+    console.log('PASS 2: Sweep — all remaining thin descriptions (< 150 chars)');
+    console.log('═══════════════════════════════════════════');
+
+    // Exclude ones we just did in pass 1 to avoid double-processing
+    const thinConcepts = await prisma.$queryRaw<any[]>`
+        SELECT * FROM concepts
+        WHERE LENGTH(description) < 150
+          AND category != ALL(${PRIORITY_CATEGORIES}::text[])
+          AND sub_category != ALL(${PRIORITY_SUBCATEGORIES}::text[])
+        ORDER BY id ASC;
+    `;
+
+    console.log(`Found ${thinConcepts.length} additional concepts with thin descriptions.\n`);
+    let p2 = 0;
+    for (const concept of thinConcepts) {
+        p2++;
+        try {
+            await enrichOne(concept, `${p2}/${thinConcepts.length} ${concept.category}/${concept.sub_category}`);
+        } catch (err) {
+            console.error(`  ❌ Failed: "${concept.name}"`, err);
+        }
+    }
+
+    console.log(`\n✅ Enrichment complete.`);
+    console.log(`   Pass 1 (priority): ${p1} concepts`);
+    console.log(`   Pass 2 (sweep):    ${p2} concepts`);
+    console.log(`   Total:             ${p1 + p2} concepts`);
+}
+
+enrichConcepts().finally(() => prisma.$disconnect());

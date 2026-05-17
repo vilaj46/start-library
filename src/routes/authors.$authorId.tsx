@@ -155,7 +155,7 @@ function AuthorDetailPage() {
                         <div className="flex-1">
                           <div className="flex items-baseline gap-3 mb-2">
                             <h3 className="text-2xl font-bold text-[var(--sea-ink)] group-hover:text-[var(--lagoon-deep)] transition-colors">
-                              {work.title}
+                              <Link to={`/works/${work.id}`}>{work.title}</Link>
                             </h3>
                             {seriesOrder !== undefined && seriesOrder !== null && (
                               <span className="shrink-0 rounded-lg bg-[var(--sea-ink)]/5 px-2 py-1 text-xs font-bold text-[var(--sea-ink-soft)]">
