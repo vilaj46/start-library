@@ -15,16 +15,15 @@ export const WorkRepository = {
         olRawResponse: any,
         authorId: number,
         vectorString: string,
-        meta: { googleRawResponse?: Record<string, unknown> | null; structuredTags?: Record<string, string[]> | null } = {}
+        meta: { googleRawResponse?: Record<string, unknown> | null } = {}
     ) {
         const googleRaw = meta.googleRawResponse ? JSON.stringify(meta.googleRawResponse) : null;
-        const tagsJson = meta.structuredTags ? JSON.stringify(meta.structuredTags) : null;
         const res = await prisma.$queryRaw<{ id: number }[]>`
-            INSERT INTO works (title, description, ol_raw_response, author_id, embedding, google_raw_response, structured_tags)
+            INSERT INTO works (title, description, ol_raw_response, author_id, embedding, google_raw_response)
             VALUES (
                 ${title}, ${description}, ${JSON.stringify(olRawResponse)}::jsonb,
                 ${authorId}, ${vectorString}::vector(1024),
-                ${googleRaw}::jsonb, ${tagsJson}::jsonb
+                ${googleRaw}::jsonb
             )
             RETURNING id;
         `;
@@ -64,13 +63,11 @@ export const WorkRepository = {
         `;
     },
 
-    async updateEmbedding(workId: number, description: string, vectorString: string, structuredTags?: Record<string, string[]> | null) {
-        const tagsJson = structuredTags ? JSON.stringify(structuredTags) : null;
+    async updateEmbedding(workId: number, description: string, vectorString: string) {
         return prisma.$executeRaw`
             UPDATE works
             SET embedding = ${vectorString}::vector(1024),
-                description = ${description},
-                structured_tags = COALESCE(${tagsJson}::jsonb, structured_tags)
+                description = ${description}
             WHERE id = ${workId};
         `;
     },

@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { prisma } from "../src/db";
 import { embeddingClient } from "../src/lib/ai/embedding";
-import { summarizeWork, tagWorkStructurally } from "../src/lib/ai/generator";
+import { summarizeWork } from "../src/lib/ai/generator";
 import { VectorMath } from "../src/lib/math";
 import { AuthorRepository } from "../src/db/authors/repository";
 
@@ -13,36 +13,17 @@ import { AuthorRepository } from "../src/db/authors/repository";
 const olId = process.argv[2]?.startsWith('OL') ? process.argv[2] : undefined;
 const isDry = process.argv.includes('--dry');
 
-async function reenrichWork(work: { id: number; title: string; description: string | null; structuredTags: any }) {
+async function reenrichWork(work: { id: number; title: string; description: string | null }) {
     const description = work.description || "";
     if (!description) {
         console.log(`  ⚠️  Skipping "${work.title}" — no description`);
         return false;
     }
 
-    // Reuse existing tags if already generated — skip the LLM call
-    let structuredTags = work.structuredTags as { narrative: string[]; world: string[]; character: string[]; system: string[]; genre: string[] } | null;
-    if (structuredTags) {
-        console.log(`  ♻️  Reusing existing structured tags`);
-    } else {
-        const thematicSummary = await summarizeWork(work.title, description);
-        structuredTags = await tagWorkStructurally(work.title, thematicSummary);
-    }
+    const thematicSummary = await summarizeWork(work.title, description);
+    const workText = `Summary: ${thematicSummary}. Description: ${description.slice(0, 500)}`;
 
-    const tagText = [
-        structuredTags.narrative.length ? `Narrative: ${structuredTags.narrative.join(', ')}.` : '',
-        structuredTags.world.length     ? `World: ${structuredTags.world.join(', ')}.` : '',
-        structuredTags.character.length ? `Characters: ${structuredTags.character.join(', ')}.` : '',
-        structuredTags.system.length    ? `Systems: ${structuredTags.system.join(', ')}.` : '',
-        structuredTags.genre.length     ? `Genre: ${structuredTags.genre.join(', ')}.` : '',
-    ].filter(Boolean).join(' ');
-
-    if (!tagText) {
-        console.log(`  ⚠️  Skipping "${work.title}" — LLM returned no tags`);
-        return false;
-    }
-
-    const [embedding] = await embeddingClient.fetchBatch([tagText]);
+    const [embedding] = await embeddingClient.fetchBatch([workText]);
     if (!embedding || embedding.length === 0) {
         console.log(`  ⚠️  Skipping "${work.title}" — embedding failed`);
         return false;
@@ -51,15 +32,13 @@ async function reenrichWork(work: { id: number; title: string; description: stri
     const vectorString = VectorMath.toVectorString(embedding);
 
     if (isDry) {
-        console.log(`  [dry] Tags: ${tagText.slice(0, 120)}...`);
+        console.log(`  [dry] Summary: ${thematicSummary.slice(0, 100)}...`);
         return true;
     }
 
-    // Update embedding and structured tags
     await prisma.$executeRaw`
         UPDATE works
-        SET embedding = ${vectorString}::vector(1024),
-            structured_tags = ${JSON.stringify(structuredTags)}::jsonb
+        SET embedding = ${vectorString}::vector(1024)
         WHERE id = ${work.id};
     `;
 
@@ -98,7 +77,9 @@ async function reenrichWork(work: { id: number; title: string; description: stri
         ? closestConcepts.filter(c => c.similarity >= 0.65)
         : closestConcepts.filter(c => c.similarity >= 0.60);
 
-    for (const match of toLink) {
+    const unique = [...new Map(toLink.map(c => [c.id, c])).values()];
+
+    for (const match of unique) {
         await prisma.$executeRaw`
             INSERT INTO work_concepts (work_id, concept_id, similarity)
             VALUES (${work.id}, ${match.id}, ${match.similarity})
@@ -106,19 +87,16 @@ async function reenrichWork(work: { id: number; title: string; description: stri
         `;
     }
 
-    const unique = [...new Map(toLink.map(c => [c.id, c])).values()];
     console.log(`  ✅ Linked ${unique.length} concepts: ${unique.map(c => `"${c.name}" [${c.category}]`).join(', ')}`);
     return true;
 }
 
 async function main() {
-    const whereClause = olId
-        ? { author: { openLibraryId: olId } }
-        : {};
+    const whereClause = olId ? { author: { openLibraryId: olId } } : {};
 
     const works = await prisma.work.findMany({
         where: whereClause,
-        select: { id: true, title: true, description: true, structuredTags: true, author: { select: { id: true, name: true, openLibraryId: true } } },
+        select: { id: true, title: true, description: true, author: { select: { id: true } } },
         orderBy: { id: 'asc' },
     });
 
@@ -127,10 +105,8 @@ async function main() {
         return;
     }
 
-    const authorLabel = olId ? `author ${olId}` : 'all authors';
-    console.log(`Re-enriching ${works.length} works for ${authorLabel}${isDry ? ' [DRY RUN]' : ''}...\n`);
+    console.log(`Re-enriching ${works.length} works${olId ? ` for ${olId}` : ''}${isDry ? ' [DRY RUN]' : ''}...\n`);
 
-    // Group by author for centroid update
     const authorIds = new Set<number>();
     let enriched = 0;
 
@@ -147,7 +123,6 @@ async function main() {
         for (const authorId of authorIds) {
             await AuthorRepository.updateCentroid(authorId);
         }
-        console.log(`\n🎯 Updated centroid for ${authorIds.size} author(s)`);
     }
 
     console.log(`\nDone. ${enriched}/${works.length} works re-enriched.`);

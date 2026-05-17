@@ -6,7 +6,7 @@ import { AuthorRepository } from "#/db/authors/repository";
 import { WorkRepository } from "#/db/works/repository";
 import type { OpenLibraryId } from "#/lib/openlibrary/schema";
 import { detectSeries, extractText, isQualityWork, matchesTitleBlacklist, normalizeTitle } from "#/lib/openlibrary/utils";
-import { enrichAuthorBiography, summarizeWork, tagWorkStructurally } from "#/lib/ai/generator";
+import { enrichAuthorBiography, summarizeWork } from "#/lib/ai/generator";
 import { VectorMath } from "#/lib/math";
 
 const googleBooksClient = new GoogleBooksClient();
@@ -93,26 +93,12 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
             ? googleDescription
             : olDescription;
 
-        // Summarize into a clean thematic blurb, then tag structurally.
         console.log(`🧠 Summarizing "${olWork.title}"...`);
         const thematicSummary = await summarizeWork(olWork.title, description || "No description provided.");
 
-        console.log(`🏷️  Tagging "${olWork.title}" structurally...`);
-        const structuredTags = await tagWorkStructurally(olWork.title, thematicSummary);
-
-        // Build embedding text from structured tags — mirrors how concepts are described
-        // (by mechanics and appeal rather than plot), giving better vector space alignment.
-        const tagText = [
-            structuredTags.narrative.length ? `Narrative: ${structuredTags.narrative.join(', ')}.` : '',
-            structuredTags.world.length     ? `World: ${structuredTags.world.join(', ')}.` : '',
-            structuredTags.character.length ? `Characters: ${structuredTags.character.join(', ')}.` : '',
-            structuredTags.system.length    ? `Systems: ${structuredTags.system.join(', ')}.` : '',
-            structuredTags.genre.length     ? `Genre: ${structuredTags.genre.join(', ')}.` : '',
-        ].filter(Boolean).join(' ');
-
         const limitedSubjects = (olWork.subjects || []).slice(0, 40).join(', ');
         const categoriesText = googleCategories.length > 0 ? ` Genres: ${googleCategories.join(', ')}.` : '';
-        const workText = `${tagText} Subjects: ${limitedSubjects}.${categoriesText}`;
+        const workText = `Summary: ${thematicSummary}. Subjects: ${limitedSubjects}.${categoriesText}`;
         const [workEmbedding] = await embeddingClient.fetchBatch([workText]);
 
         if (!workEmbedding || workEmbedding.length === 0) continue;
@@ -143,11 +129,11 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
                 olWork,
                 author.id,
                 vectorString,
-                { googleRawResponse: googleRaw, structuredTags }
+                { googleRawResponse: googleRaw }
             );
             work = { id: created.id, ...olWork };
         } else {
-            await WorkRepository.updateEmbedding(work.id, description, vectorString, structuredTags);
+            await WorkRepository.updateEmbedding(work.id, description, vectorString);
         }
 
         if (seriesInfo.name) {

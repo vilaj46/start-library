@@ -104,7 +104,6 @@ model Work {
   description     String?  @db.Text
   olRawResponse     Json?    @map("ol_raw_response")
   googleRawResponse Json?    @map("google_raw_response")
-  structuredTags    Json?    @map("structured_tags")
   embedding         Unsupported("vector(1024)")?
 
   authorId        Int      @map("author_id")
