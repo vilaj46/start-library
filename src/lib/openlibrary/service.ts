@@ -11,6 +11,27 @@ import { VectorMath } from "#/lib/math";
 
 const googleBooksClient = new GoogleBooksClient();
 
+function inferConceptCategories(googleCategories: string[], subjects: string[]): string[] {
+    const signals = [...googleCategories, ...subjects].map(s => s.toLowerCase());
+    // narrative, character, intensity apply to every genre fiction work
+    const cats = new Set(['narrative', 'character', 'intensity']);
+
+    const isFantasy = signals.some(s => /fantasy|magic|wizard|witch|supernatural|paranormal|mythic/.test(s));
+    const isSci    = signals.some(s => /sci.fi|science fiction|dystopi|speculative|cyberpunk|space/.test(s));
+    const isHorror = signals.some(s => /horror/.test(s));
+
+    if (isFantasy || isSci || isHorror) {
+        cats.add('world');   // worldbuilding always relevant for genre fiction
+        cats.add('system');  // magic/tech systems
+        cats.add('genre');
+    }
+    if (isFantasy) cats.add('content'); // content: horror sub-overlap, dark fantasy
+    if (isSci)     cats.add('content'); // content: sci_fi
+    if (isHorror)  cats.add('content'); // content: horror
+
+    return [...cats];
+}
+
 export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
     const olAuthor = await openLibraryClient.fetchAuthorById(openLibraryId);
     if (!olAuthor) {
@@ -145,10 +166,12 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
 
         if (!work) continue;
 
-        // Fetch Top 8 closest concepts for semantic depth
+        // Fetch Top 8 closest concepts, scoped to categories relevant to this work's genre
+        const conceptCategories = inferConceptCategories(googleCategories, olWork.subjects || []);
         const closestConcepts = await prisma.$queryRaw<{ id: number, similarity: number, name: string }[]>`
             SELECT id, name, 1 - (embedding <=> ${vectorString}::vector) as similarity
             FROM concepts
+            WHERE category = ANY(${conceptCategories}::text[])
             ORDER BY embedding <=> ${vectorString}::vector ASC
             LIMIT 8;
         `;
