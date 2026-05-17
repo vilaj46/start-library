@@ -1,0 +1,152 @@
+import 'dotenv/config';
+import { prisma } from "../src/db";
+import { embeddingClient } from "../src/lib/ai/embedding";
+import { summarizeWork, tagWorkStructurally } from "../src/lib/ai/generator";
+import { VectorMath } from "../src/lib/math";
+import { AuthorRepository } from "../src/db/authors/repository";
+
+// Usage:
+//   npx tsx bin/re-enrich-works.ts                  — re-enrich all works
+//   npx tsx bin/re-enrich-works.ts OL23919A         — re-enrich one author by OL id
+//   npx tsx bin/re-enrich-works.ts OL23919A --dry   — preview without writing
+
+const olId = process.argv[2]?.startsWith('OL') ? process.argv[2] : undefined;
+const isDry = process.argv.includes('--dry');
+
+async function reenrichWork(work: { id: number; title: string; description: string | null }) {
+    const description = work.description || "";
+    if (!description) {
+        console.log(`  ⚠️  Skipping "${work.title}" — no description`);
+        return false;
+    }
+
+    const thematicSummary = await summarizeWork(work.title, description);
+    const structuredTags = await tagWorkStructurally(work.title, thematicSummary);
+
+    const tagText = [
+        structuredTags.narrative.length ? `Narrative: ${structuredTags.narrative.join(', ')}.` : '',
+        structuredTags.world.length     ? `World: ${structuredTags.world.join(', ')}.` : '',
+        structuredTags.character.length ? `Characters: ${structuredTags.character.join(', ')}.` : '',
+        structuredTags.system.length    ? `Systems: ${structuredTags.system.join(', ')}.` : '',
+        structuredTags.genre.length     ? `Genre: ${structuredTags.genre.join(', ')}.` : '',
+    ].filter(Boolean).join(' ');
+
+    if (!tagText) {
+        console.log(`  ⚠️  Skipping "${work.title}" — LLM returned no tags`);
+        return false;
+    }
+
+    const [embedding] = await embeddingClient.fetchBatch([tagText]);
+    if (!embedding || embedding.length === 0) {
+        console.log(`  ⚠️  Skipping "${work.title}" — embedding failed`);
+        return false;
+    }
+
+    const vectorString = VectorMath.toVectorString(embedding);
+
+    if (isDry) {
+        console.log(`  [dry] Tags: ${tagText.slice(0, 120)}...`);
+        return true;
+    }
+
+    // Update embedding and structured tags
+    await prisma.$executeRaw`
+        UPDATE works
+        SET embedding = ${vectorString}::vector(1024),
+            structured_tags = ${JSON.stringify(structuredTags)}::jsonb
+        WHERE id = ${work.id};
+    `;
+
+    // Clear old concept links and re-run two-stage matching
+    await prisma.$executeRaw`DELETE FROM work_concepts WHERE work_id = ${work.id};`;
+
+    const closestConcepts = await prisma.$queryRaw<{ id: number; name: string; category: string; similarity: number }[]>`
+        WITH candidate_pool AS (
+            SELECT id, name, category,
+                   1 - (embedding <=> ${vectorString}::vector) AS similarity
+            FROM concepts
+            WHERE embedding IS NOT NULL
+            ORDER BY embedding <=> ${vectorString}::vector ASC
+            LIMIT 50
+        ),
+        top_categories AS (
+            SELECT category
+            FROM candidate_pool
+            GROUP BY category
+            ORDER BY MAX(similarity) DESC
+            LIMIT 3
+        ),
+        ranked AS (
+            SELECT cp.id, cp.name, cp.category, cp.similarity,
+                   ROW_NUMBER() OVER (PARTITION BY cp.category ORDER BY cp.similarity DESC) AS rn
+            FROM candidate_pool cp
+            INNER JOIN top_categories tc ON cp.category = tc.category
+        )
+        SELECT id, name, category, similarity
+        FROM ranked
+        WHERE rn <= 3
+        ORDER BY similarity DESC;
+    `;
+
+    const toLink = closestConcepts.filter(c => c.similarity >= 0.65).length > 0
+        ? closestConcepts.filter(c => c.similarity >= 0.65)
+        : closestConcepts.filter(c => c.similarity >= 0.60);
+
+    for (const match of toLink) {
+        await prisma.$executeRaw`
+            INSERT INTO work_concepts (work_id, concept_id, similarity)
+            VALUES (${work.id}, ${match.id}, ${match.similarity})
+            ON CONFLICT DO NOTHING;
+        `;
+    }
+
+    const unique = [...new Map(toLink.map(c => [c.id, c])).values()];
+    console.log(`  ✅ Linked ${unique.length} concepts: ${unique.map(c => `"${c.name}" [${c.category}]`).join(', ')}`);
+    return true;
+}
+
+async function main() {
+    const whereClause = olId
+        ? { author: { openLibraryId: olId } }
+        : {};
+
+    const works = await prisma.work.findMany({
+        where: whereClause,
+        select: { id: true, title: true, description: true, author: { select: { id: true, name: true, openLibraryId: true } } },
+        orderBy: { id: 'asc' },
+    });
+
+    if (works.length === 0) {
+        console.log(olId ? `No works found for author ${olId}` : 'No works in database');
+        return;
+    }
+
+    const authorLabel = olId ? `author ${olId}` : 'all authors';
+    console.log(`Re-enriching ${works.length} works for ${authorLabel}${isDry ? ' [DRY RUN]' : ''}...\n`);
+
+    // Group by author for centroid update
+    const authorIds = new Set<number>();
+    let enriched = 0;
+
+    for (const work of works) {
+        console.log(`📖 "${work.title}" (id: ${work.id})`);
+        const ok = await reenrichWork(work);
+        if (ok) {
+            enriched++;
+            authorIds.add(work.author.id);
+        }
+    }
+
+    if (!isDry) {
+        for (const authorId of authorIds) {
+            await AuthorRepository.updateCentroid(authorId);
+        }
+        console.log(`\n🎯 Updated centroid for ${authorIds.size} author(s)`);
+    }
+
+    console.log(`\nDone. ${enriched}/${works.length} works re-enriched.`);
+}
+
+main()
+    .catch(console.error)
+    .finally(() => prisma.$disconnect());
