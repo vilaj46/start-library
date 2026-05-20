@@ -82,9 +82,12 @@ async function reenrichWork(work: { id: number; title: string; description: stri
         ORDER BY similarity DESC;
     `;
 
-    const toLink = closestConcepts.filter(c => c.similarity >= 0.65).length > 0
-        ? closestConcepts.filter(c => c.similarity >= 0.65)
-        : closestConcepts.filter(c => c.similarity >= 0.60);
+    const MIN_CONCEPTS = 3;
+    const high = closestConcepts.filter(c => c.similarity >= 0.65);
+    const toLink = high.length >= MIN_CONCEPTS
+        ? high
+        : [...high, ...closestConcepts.filter(c => c.similarity < 0.65 && c.similarity >= 0.50)]
+            .slice(0, Math.max(high.length, MIN_CONCEPTS));
 
     const unique = [...new Map(toLink.map(c => [c.id, c])).values()];
 

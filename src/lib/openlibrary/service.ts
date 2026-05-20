@@ -11,6 +11,26 @@ import { VectorMath } from "#/lib/math";
 
 const googleBooksClient = new GoogleBooksClient();
 
+const MIN_CONCEPTS = 3;
+const HIGH_THRESHOLD = 0.65;
+const FLOOR_THRESHOLD = 0.50;
+
+type ConceptMatch = { id: number; name: string; category: string; similarity: number };
+
+function selectConceptsToLink(candidates: ConceptMatch[]): ConceptMatch[] {
+    // Always take everything above the high threshold first
+    const high = candidates.filter(c => c.similarity >= HIGH_THRESHOLD);
+
+    if (high.length >= MIN_CONCEPTS) return high;
+
+    // Below minimum — fill up to MIN_CONCEPTS from remaining candidates above floor
+    const remaining = candidates
+        .filter(c => c.similarity < HIGH_THRESHOLD && c.similarity >= FLOOR_THRESHOLD)
+        .sort((a, b) => b.similarity - a.similarity);
+
+    return [...high, ...remaining].slice(0, Math.max(high.length, MIN_CONCEPTS));
+}
+
 export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
     const olAuthor = await openLibraryClient.fetchAuthorById(openLibraryId);
     if (!olAuthor) {
@@ -187,10 +207,7 @@ export async function processOpenLibraryAuthor(openLibraryId: OpenLibraryId) {
 
         console.log(`🔍 Top matches for "${work.title}":`, closestConcepts.slice(0, 3).map(c => `${c.name} [${c.category}] (${c.similarity.toFixed(4)})`).join(', '));
 
-        const primaryMatches = closestConcepts.filter(c => c.similarity >= 0.65);
-        const toLink = primaryMatches.length > 0
-            ? primaryMatches
-            : closestConcepts.filter(c => c.similarity >= 0.60);
+        const toLink = selectConceptsToLink(closestConcepts);
 
         for (const match of toLink) {
             await WorkRepository.linkConcept(work.id, match.id, match.similarity);
